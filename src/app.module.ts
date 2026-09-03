@@ -4,6 +4,8 @@ import { AppController } from './app.controller';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
+import { UsersModule } from './modules/users/users.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -13,8 +15,10 @@ import { DatabaseModule } from './database/database.module';
       validate: validateEnv, // fail-fast kalau ada env wajib yang kosong/salah format
     }),
     DatabaseModule,
-    // Feature modules (auth, profile, role, permission) akan didaftarkan
-    // di sini satu per satu mulai Phase 1.
+    UsersModule,
+    AuthModule,
+    // Feature modules (profile, role, permission) akan didaftarkan
+    // di sini satu per satu mulai Phase 3/4.
   ],
   controllers: [AppController],
   providers: [],

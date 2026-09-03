@@ -19,6 +19,10 @@ export const envValidationSchema = Joi.object({
   // Database
   DATABASE_URL: Joi.string().uri().required(),
 
+  // JWT
+  JWT_ACCESS_SECRET: Joi.string().min(32).required(),
+  JWT_ACCESS_EXPIRES_IN: Joi.string().default('15m'),
+
   // CORS
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
 }).unknown(true); // izinkan env lain (mis. dari OS/CI) yang tidak kita definisikan

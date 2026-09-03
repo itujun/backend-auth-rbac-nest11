@@ -12,6 +12,10 @@ export default () => ({
   database: {
     url: process.env.DATABASE_URL,
   },
+  jwt: {
+    accessSecret: process.env.JWT_ACCESS_SECRET,
+    accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
+  },
 });
 
 export type AppConfig = ReturnType<typeof import('./configuration').default>;

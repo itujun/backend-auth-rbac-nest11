@@ -89,6 +89,57 @@ src/
   `AllExceptionsFilter` dan dibentuk konsisten `{ success:false, statusCode, message, errors?, timestamp, path }`.
   Controller tidak perlu tahu soal ini — cukup `return data;` atau
   `throw new BadRequestException(...)`.
+- **Auth: secure by default**: `JwtAuthGuard` didaftarkan sebagai
+  `APP_GUARD` (global), jadi SEMUA route protected secara default.
+  Endpoint yang memang harus publik (register, login, health check)
+  ditandai eksplisit dengan `@Public()`. Ini mencegah developer lupa
+  pasang guard di endpoint baru.
+- **Transaction untuk data yang saling bergantung**: registrasi user
+  insert ke tabel `users` DAN `profiles` dalam satu `db.transaction()`
+  karena `profiles.user_id` NOT NULL UNIQUE — user tanpa profile adalah
+  state tidak valid, jadi kalau salah satu insert gagal, keduanya rollback.
+- **Anti user-enumeration**: pesan error login untuk "email tidak
+  terdaftar" dan "password salah" dibuat SAMA persis, supaya attacker
+  tidak bisa menyimpulkan email mana yang valid dari respons API.
+
+## Catatan Teknis: ESM-only dependencies + Jest
+
+Beberapa package terbaru (`@nestjs/config`, `@nestjs/jwt`,
+`@nestjs/passport`, `drizzle-orm`, `@standard-schema/spec`) sudah
+ship sebagai **pure ESM** (`"type": "module"` di package.json mereka),
+sementara project ini jalan dalam mode CommonJS. Aplikasi utama
+(`node dist/src/main.js`) tidak masalah, tapi **Jest** menolak me-
+`require()` file ESM tersebut secara default.
+
+Fix-nya: `transformIgnorePatterns` di `package.json` (unit test) dan
+`test/jest-e2e.json` (e2e test) di-override supaya ts-jest ikut
+mentransform package-package tersebut jadi CommonJS sebelum dijalankan.
+Kalau nanti nambah dependency baru dan Jest tiba-tiba error
+`"Must use import to load ES Module"`, kemungkinan besar dependency
+itu juga ESM-only — tinggal tambahkan namanya ke pattern yang sama.
+
+## API Endpoints (Phase 1)
+
+| Method | Endpoint            | Auth?     | Deskripsi                                |
+| ------ | -------------------- | --------- | ------------------------------------------ |
+| GET    | `/api/health`         | Public    | Health check                               |
+| POST   | `/api/auth/register`  | Public    | Registrasi user baru + auto-create profile |
+| POST   | `/api/auth/login`     | Public    | Login, dapat `accessToken` (JWT)           |
+| GET    | `/api/auth/me`        | Protected | Data user yang sedang login (perlu `Authorization: Bearer <accessToken>`) |
+
+Contoh:
+```bash
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"budi@example.com","password":"password123","fullName":"Budi Santoso"}'
+
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"budi@example.com","password":"password123"}'
+
+curl http://localhost:3000/api/auth/me \
+  -H "Authorization: Bearer <accessToken dari response login>"
+```
 
 ## Progress Roadmap
 
@@ -96,7 +147,10 @@ src/
       Config + env validation, Drizzle setup (7 tabel sesuai ERD),
       Docker Compose Postgres, standard response wrapper, global
       exception filter, base repository pattern, clean folder structure.
-- [ ] **Phase 1 — Auth MVP** (register, login, JWT access token, guard)
+- [x] **Phase 1 — Auth MVP**
+      Register (+ auto create profile via transaction), login, JWT
+      access token, global guard dengan `@Public()` opt-out,
+      password hashing (argon2), validasi DTO, anti user-enumeration.
 - [ ] **Phase 2 — Refresh Token System** (cookie, rotasi, revoke)
 - [ ] **Phase 3 — RBAC** (role, permission, CRUD, permission guard)
 - [ ] **Phase 4 — Profile Module** (CRUD + upload avatar + kompresi)
