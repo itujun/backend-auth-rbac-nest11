@@ -10,6 +10,10 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { User } from '../../database/schema';
+import {
+  RefreshTokensService,
+  RequestMeta,
+} from './refresh-tokens/refresh-tokens.service';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +21,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly hashingService: HashingService,
     private readonly jwtService: JwtService,
+    private readonly refreshTokensService: RefreshTokensService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -36,7 +41,7 @@ export class AuthService {
     return this.usersService.sanitize(user);
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, meta: RequestMeta = {}) {
     const user = await this.usersService.findByEmail(dto.email);
 
     // Pesan error SENGAJA dibuat sama antara "email tidak ada" dan
@@ -64,11 +69,46 @@ export class AuthService {
     }
 
     const accessToken = await this.generateAccessToken(user);
+    const refreshToken = await this.refreshTokensService.issue(user.id, meta);
 
     return {
       accessToken,
+      refreshToken: refreshToken.rawToken,
+      refreshTokenExpiresAt: refreshToken.expiresAt,
       user: this.usersService.sanitize(user),
     };
+  }
+
+  /** Tukar refresh token (dari cookie) dengan access token + refresh token baru. */
+  async refresh(rawRefreshToken: string, meta: RequestMeta = {}) {
+    const { userId, refreshToken } = await this.refreshTokensService.rotate(
+      rawRefreshToken,
+      meta,
+    );
+
+    const user = await this.usersService.findActiveById(userId);
+    if (!user) {
+      // Edge case: user dihapus/dinonaktifkan tapi refresh token-nya
+      // masih ada & valid (belum expired). Tolak dan bersihkan sesi.
+      await this.refreshTokensService.revokeAllForUser(userId);
+      throw new UnauthorizedException('User tidak ditemukan atau tidak aktif');
+    }
+
+    const accessToken = await this.generateAccessToken(user);
+
+    return {
+      accessToken,
+      refreshToken: refreshToken.rawToken,
+      refreshTokenExpiresAt: refreshToken.expiresAt,
+    };
+  }
+
+  logout(rawRefreshToken: string): Promise<void> {
+    return this.refreshTokensService.revoke(rawRefreshToken);
+  }
+
+  logoutAll(userId: number): Promise<void> {
+    return this.refreshTokensService.revokeAllForUser(userId);
   }
 
   private generateAccessToken(user: User): Promise<string> {

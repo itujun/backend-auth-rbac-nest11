@@ -101,6 +101,22 @@ src/
 - **Anti user-enumeration**: pesan error login untuk "email tidak
   terdaftar" dan "password salah" dibuat SAMA persis, supaya attacker
   tidak bisa menyimpulkan email mana yang valid dari respons API.
+- **Refresh token = opaque random string, bukan JWT**: di-generate
+  `crypto.randomBytes(64)`, disimpan ke DB sebagai SHA-256 hash (beda
+  dari password yang pakai argon2 — alasannya didokumentasikan di
+  `modules/auth/utils/hash-token.util.ts`). Access token tetap JWT
+  seperti biasa (stateless, short-lived).
+- **Refresh token HANYA lewat httpOnly cookie**, tidak pernah muncul
+  di body JSON — supaya tidak bisa dicuri lewat XSS/JS di sisi client.
+- **Rotasi + reuse detection**: setiap `/auth/refresh` langsung
+  me-revoke token lama dan menerbitkan yang baru (kolom `replaced_by_id`
+  di ERD dipakai persis untuk ini). Kalau ada yang mencoba memakai
+  token yang SUDAH di-revoke (baik karena sudah dirotasi ATAU sudah
+  logout), sistem menganggap itu sinyal token dicuri dan langsung
+  me-revoke SEMUA sesi user tersebut — mendorong re-login penuh di
+  semua device. Trade-off ini disengaja (mirip pendekatan Auth0/AWS
+  Cognito): sekali sebuah refresh token "dipakai ulang" setelah tidak
+  valid, seluruh session family dianggap tidak bisa dipercaya lagi.
 
 ## Catatan Teknis: ESM-only dependencies + Jest
 
@@ -118,28 +134,45 @@ Kalau nanti nambah dependency baru dan Jest tiba-tiba error
 `"Must use import to load ES Module"`, kemungkinan besar dependency
 itu juga ESM-only — tinggal tambahkan namanya ke pattern yang sama.
 
-## API Endpoints (Phase 1)
+## API Endpoints (Phase 1 + 2)
 
-| Method | Endpoint            | Auth?     | Deskripsi                                |
-| ------ | -------------------- | --------- | ------------------------------------------ |
-| GET    | `/api/health`         | Public    | Health check                               |
-| POST   | `/api/auth/register`  | Public    | Registrasi user baru + auto-create profile |
-| POST   | `/api/auth/login`     | Public    | Login, dapat `accessToken` (JWT)           |
-| GET    | `/api/auth/me`        | Protected | Data user yang sedang login (perlu `Authorization: Bearer <accessToken>`) |
+| Method | Endpoint               | Auth?     | Deskripsi                                |
+| ------ | ----------------------- | --------- | ------------------------------------------ |
+| GET    | `/api/health`            | Public    | Health check                               |
+| POST   | `/api/auth/register`     | Public    | Registrasi user baru + auto-create profile |
+| POST   | `/api/auth/login`        | Public    | Login → `accessToken` di body, `refresh_token` di httpOnly cookie |
+| POST   | `/api/auth/refresh`      | Public*   | Tukar refresh token (cookie) dengan access token + refresh token baru (rotasi) |
+| POST   | `/api/auth/logout`       | Public*   | Revoke sesi saat ini (device ini saja)     |
+| POST   | `/api/auth/logout-all`   | Protected | Revoke SEMUA sesi milik user (butuh access token) |
+| GET    | `/api/auth/me`           | Protected | Data user yang sedang login                |
+
+\* `refresh` dan `logout` tidak butuh `Authorization` header (bukan
+dilindungi JWT guard), tapi tetap butuh refresh token cookie yang valid
+untuk berfungsi — beda mekanisme autentikasi, bukan berarti "tanpa
+autentikasi sama sekali".
 
 Contoh:
 ```bash
-curl -X POST http://localhost:3000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"budi@example.com","password":"password123","fullName":"Budi Santoso"}'
-
-curl -X POST http://localhost:3000/api/auth/login \
+# Login — simpan cookie ke jar (butuh -c saat login, -b saat request selanjutnya)
+curl -c cookies.txt -X POST http://localhost:3000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"budi@example.com","password":"password123"}'
 
-curl http://localhost:3000/api/auth/me \
-  -H "Authorization: Bearer <accessToken dari response login>"
+# Refresh (pakai cookie yang tersimpan)
+curl -b cookies.txt -c cookies.txt -X POST http://localhost:3000/api/auth/refresh
+
+# Logout
+curl -b cookies.txt -X POST http://localhost:3000/api/auth/logout
+
+# Logout semua device (butuh access token dari login/refresh terakhir)
+curl -X POST http://localhost:3000/api/auth/logout-all \
+  -H "Authorization: Bearer <accessToken>"
 ```
+
+Kalau test dari Postman/Insomnia/frontend browser: pastikan opsi
+"send cookies automatically" / `credentials: 'include'` aktif, karena
+refresh token cookie di-scope ke path `/api/auth` dan `httpOnly`
+(tidak bisa dibaca/di-attach manual lewat JS).
 
 ## Progress Roadmap
 
@@ -151,7 +184,11 @@ curl http://localhost:3000/api/auth/me \
       Register (+ auto create profile via transaction), login, JWT
       access token, global guard dengan `@Public()` opt-out,
       password hashing (argon2), validasi DTO, anti user-enumeration.
-- [ ] **Phase 2 — Refresh Token System** (cookie, rotasi, revoke)
+- [x] **Phase 2 — Refresh Token System**
+      Refresh token opaque + hash SHA-256, httpOnly cookie, rotasi
+      per-request, reuse detection (auto-revoke semua sesi kalau ada
+      indikasi token dicuri), endpoint logout & logout-all.
+- [ ] **Phase 3 — RBAC** (role, permission, CRUD, permission guard)
 - [ ] **Phase 3 — RBAC** (role, permission, CRUD, permission guard)
 - [ ] **Phase 4 — Profile Module** (CRUD + upload avatar + kompresi)
 - [ ] **Phase 5 — List Features** (pagination, search, sort, filter — DRY layer)

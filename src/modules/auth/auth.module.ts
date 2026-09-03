@@ -10,6 +10,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { UsersModule } from '../users/users.module';
 import { HashingModule } from '../../core/hashing/hashing.module';
+import { RefreshTokensRepository } from './refresh-tokens/refresh-tokens.repository';
+import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
+import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
 
 @Module({
   imports: [
@@ -36,6 +39,9 @@ import { HashingModule } from '../../core/hashing/hashing.module';
   providers: [
     AuthService,
     JwtStrategy,
+    RefreshTokensRepository,
+    RefreshTokensService,
+    RefreshCookieHelper,
     // Didaftarkan sebagai APP_GUARD supaya berlaku GLOBAL ke semua route
     // di seluruh aplikasi (bukan cuma modul ini) — lihat penjelasan
     // "secure by default" di common/decorators/public.decorator.ts
