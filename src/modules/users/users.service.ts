@@ -18,6 +18,10 @@ export class UsersService {
     return this.usersRepository.findActiveById(id);
   }
 
+  findById(id: number) {
+    return this.usersRepository.findById(id);
+  }
+
   createWithProfile(input: CreateUserWithProfileInput) {
     return this.usersRepository.createWithProfile(input);
   }

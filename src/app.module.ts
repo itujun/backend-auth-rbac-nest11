@@ -6,6 +6,9 @@ import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { AuthorizationModule } from './core/authorization/authorization.module';
+import { PermissionsModule } from './modules/permissions/permissions.module';
+import { RolesModule } from './modules/roles/roles.module';
 
 @Module({
   imports: [
@@ -15,10 +18,19 @@ import { AuthModule } from './modules/auth/auth.module';
       validate: validateEnv, // fail-fast kalau ada env wajib yang kosong/salah format
     }),
     DatabaseModule,
+    // URUTAN IMPORT INI PENTING: NestJS menjalankan beberapa provider
+    // APP_GUARD sesuai urutan modul di-resolve. AuthModule (JwtAuthGuard,
+    // yang mengisi `request.user`) HARUS di-import SEBELUM
+    // AuthorizationModule (PermissionsGuard, yang MEMBACA `request.user`).
+    // Kalau kebalik, PermissionsGuard jalan duluan dan selalu menolak
+    // dengan "User tidak terautentikasi" walau token valid — pernah
+    // benar-benar kejadian saat testing Phase 3, lihat README.
     UsersModule,
     AuthModule,
-    // Feature modules (profile, role, permission) akan didaftarkan
-    // di sini satu per satu mulai Phase 3/4.
+    AuthorizationModule,
+    PermissionsModule,
+    RolesModule,
+    // Feature module (profile) akan didaftarkan mulai Phase 4.
   ],
   controllers: [AppController],
   providers: [],

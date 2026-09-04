@@ -117,22 +117,69 @@ src/
   semua device. Trade-off ini disengaja (mirip pendekatan Auth0/AWS
   Cognito): sekali sebuah refresh token "dipakai ulang" setelah tidak
   valid, seluruh session family dianggap tidak bisa dipercaya lagi.
+- **Permission dicek LIVE dari database**, bukan di-embed ke JWT
+  payload (`AuthorizationService.getUserPermissionNames()` query join
+  `user_roles -> role_permissions -> permissions` di setiap request
+  yang butuh `@RequirePermission()`). Konsekuensinya: assign/revoke
+  role ke user langsung berlaku di request berikutnya, TANPA user
+  perlu logout/refresh token dulu — sudah diverifikasi langsung lewat
+  testing manual (lihat catatan bug guard-order di bawah).
+- **`role_permissions` dan `user_roles` punya unique constraint**
+  komposit (`role_id + permission_id` dan `user_id + role_id`) — dasar
+  awalnya (Phase 0) belum ada, ditambahkan di Phase 3 supaya assign
+  yang sama dua kali tidak menghasilkan baris duplikat di database.
+- **Seed script untuk bootstrap RBAC**: karena SEMUA endpoint role/
+  permission dilindungi `@RequirePermission`, harus ada cara membuat
+  role/permission pertama tanpa lewat API (chicken-and-egg problem).
+  `npm run db:seed` membuat baseline permission + role `superadmin`,
+  dan bisa meng-assign-nya ke user tertentu lewat env `SEED_ADMIN_EMAIL`.
+
+## Bug Nyata yang Ditemukan Saat Testing: Urutan APP_GUARD
+
+Saat testing manual Phase 3, endpoint yang di-protect `@RequirePermission`
+SELALU menolak dengan "User tidak terautentikasi" — walau token JWT-nya
+valid. Root cause: ada DUA provider `APP_GUARD` global (`JwtAuthGuard` di
+`AuthModule`, `PermissionsGuard` di `AuthorizationModule`), dan NestJS
+menjalankan beberapa `APP_GUARD` sesuai **urutan modul di-resolve**
+(kurang lebih mengikuti urutan `imports` di `AppModule`). Karena saat
+itu `AuthorizationModule` di-import SEBELUM `AuthModule`, `PermissionsGuard`
+jalan duluan dan membaca `request.user` yang belum di-set oleh
+`JwtAuthGuard`.
+
+Fix-nya cuma menukar urutan `imports` di `app.module.ts` (`AuthModule`
+sebelum `AuthorizationModule`) — tapi ini pelajaran penting: **urutan
+provider `APP_GUARD` di berbagai modul itu signifikan** kalau satu
+guard bergantung pada state yang diisi guard lain. Kalau nanti nambah
+guard global baru yang butuh `request.user`, pastikan modul yang
+provide `JwtAuthGuard` (`AuthModule`) tetap di-import lebih dulu.
 
 ## Catatan Teknis: ESM-only dependencies + Jest
 
 Beberapa package terbaru (`@nestjs/config`, `@nestjs/jwt`,
-`@nestjs/passport`, `drizzle-orm`, `@standard-schema/spec`) sudah
-ship sebagai **pure ESM** (`"type": "module"` di package.json mereka),
-sementara project ini jalan dalam mode CommonJS. Aplikasi utama
-(`node dist/src/main.js`) tidak masalah, tapi **Jest** menolak me-
-`require()` file ESM tersebut secara default.
+`@nestjs/passport`, `@nestjs/mapped-types`, `drizzle-orm`,
+`@standard-schema/spec`) sudah ship sebagai **pure ESM**
+(`"type": "module"` di package.json mereka), sementara project ini
+jalan dalam mode CommonJS. Aplikasi utama (`node dist/src/main.js`)
+tidak masalah, tapi **Jest** menolak me-`require()` file ESM tersebut
+secara default.
 
-Fix-nya: `transformIgnorePatterns` di `package.json` (unit test) dan
-`test/jest-e2e.json` (e2e test) di-override supaya ts-jest ikut
-mentransform package-package tersebut jadi CommonJS sebelum dijalankan.
+Percobaan pertama (`transformIgnorePatterns` + `ts-jest` polos) berhasil
+untuk sebagian besar package, tapi gagal khusus untuk
+`@nestjs/mapped-types` karena file itu memakai sintaks `import.meta.url`
+yang butuh compiler khusus untuk dikonversi ke CommonJS — `ts-jest`
+punya keterbatasan resmi soal transform file `.js` di dalam
+`node_modules`. Solusi akhir yang dipakai project ini: **`@swc/jest`**
+(compiler Rust berbasis SWC, sama yang dipakai `@nestjs/cli` untuk
+build cepat) — jauh lebih robust untuk interop ESM/CJS termasuk kasus
+`import.meta.url`. Konfigurasinya ada di `package.json` (key `"jest"`)
+dan `test/jest-e2e.json`, keduanya pakai `transform` + `transformIgnorePatterns`
+yang sama.
+
 Kalau nanti nambah dependency baru dan Jest tiba-tiba error
 `"Must use import to load ES Module"`, kemungkinan besar dependency
-itu juga ESM-only — tinggal tambahkan namanya ke pattern yang sama.
+itu juga ESM-only — tinggal tambahkan namanya ke pattern
+`transformIgnorePatterns` di KEDUA file config (`package.json` dan
+`test/jest-e2e.json`).
 
 ## API Endpoints (Phase 1 + 2)
 
@@ -174,6 +221,79 @@ Kalau test dari Postman/Insomnia/frontend browser: pastikan opsi
 refresh token cookie di-scope ke path `/api/auth` dan `httpOnly`
 (tidak bisa dibaca/di-attach manual lewat JS).
 
+## API Endpoints (Phase 3 — RBAC)
+
+Semua endpoint di bawah ini butuh `Authorization: Bearer <accessToken>`
+**DAN** permission yang sesuai (bukan cuma login biasa).
+
+### Permissions
+
+| Method | Endpoint                | Permission          | Deskripsi                  |
+| ------ | ------------------------ | -------------------- | ---------------------------- |
+| GET    | `/api/permissions`        | `permission:read`    | Daftar semua permission      |
+| GET    | `/api/permissions/:id`    | `permission:read`    | Detail satu permission       |
+| POST   | `/api/permissions`        | `permission:create`  | Buat permission baru         |
+| PATCH  | `/api/permissions/:id`    | `permission:update`  | Ubah permission              |
+| DELETE | `/api/permissions/:id`    | `permission:delete`  | Hapus permission             |
+
+### Roles
+
+| Method | Endpoint                          | Permission               | Deskripsi                              |
+| ------ | ----------------------------------- | -------------------------- | ----------------------------------------- |
+| GET    | `/api/roles`                        | `role:read`                 | Daftar semua role                        |
+| GET    | `/api/roles/:id`                    | `role:read`                 | Detail satu role                         |
+| POST   | `/api/roles`                        | `role:create`                | Buat role baru                           |
+| PATCH  | `/api/roles/:id`                    | `role:update`                | Ubah role (nama/deskripsi)               |
+| DELETE | `/api/roles/:id`                    | `role:delete`                | Hapus role (cascade ke assignment-nya)   |
+| GET    | `/api/roles/:id/permissions`        | `role:read`                 | Daftar permission milik role ini         |
+| PUT    | `/api/roles/:id/permissions`        | `role:manage-permissions`    | Ganti SELURUH daftar permission role ini (`{"permissionIds":[1,2,3]}`) |
+| GET    | `/api/roles/:id/users`              | `role:read`                 | Daftar user pemilik role ini             |
+| POST   | `/api/roles/:id/users/:userId`      | `role:manage-users`          | Assign role ke user                      |
+| DELETE | `/api/roles/:id/users/:userId`      | `role:manage-users`          | Cabut role dari user                     |
+
+### Bootstrap RBAC (wajib dilakukan sekali di awal)
+
+```bash
+# 1. Register user yang akan jadi admin pertama
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"password123","fullName":"Admin"}'
+
+# 2. Set di .env:
+#    SEED_ADMIN_EMAIL=admin@example.com
+
+# 3. Jalankan seed — bikin baseline permission + role superadmin,
+#    lalu assign ke admin@example.com
+npm run db:seed
+
+# 4. Login sebagai admin, sekarang bisa akses semua endpoint role/permission
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"password123"}'
+```
+
+Contoh alur assign role custom ke user lain:
+```bash
+# Buat role baru
+curl -X POST http://localhost:3000/api/roles \
+  -H "Authorization: Bearer <accessToken admin>" -H "Content-Type: application/json" \
+  -d '{"name":"editor","description":"Bisa lihat role & permission"}'
+
+# Assign permission ke role itu (ganti 5 dengan id role, [12] dengan id permission)
+curl -X PUT http://localhost:3000/api/roles/5/permissions \
+  -H "Authorization: Bearer <accessToken admin>" -H "Content-Type: application/json" \
+  -d '{"permissionIds":[12]}'
+
+# Assign role ke user (ganti 5 dengan id role, 7 dengan id user)
+curl -X POST http://localhost:3000/api/roles/5/users/7 \
+  -H "Authorization: Bearer <accessToken admin>"
+```
+
+User yang di-assign akan LANGSUNG bisa akses endpoint terkait di
+request berikutnya — tidak perlu logout/login ulang, karena permission
+dicek live dari database (lihat penjelasan di bagian "Kenapa
+strukturnya begini?").
+
 ## Progress Roadmap
 
 - [x] **Phase 0 — Fondasi & Arsitektur**
@@ -188,8 +308,11 @@ refresh token cookie di-scope ke path `/api/auth` dan `httpOnly`
       Refresh token opaque + hash SHA-256, httpOnly cookie, rotasi
       per-request, reuse detection (auto-revoke semua sesi kalau ada
       indikasi token dicuri), endpoint logout & logout-all.
-- [ ] **Phase 3 — RBAC** (role, permission, CRUD, permission guard)
-- [ ] **Phase 3 — RBAC** (role, permission, CRUD, permission guard)
+- [x] **Phase 3 — RBAC**
+      CRUD role & permission, sync permission ke role, assign/revoke
+      role ke user, `@RequirePermission()` + `PermissionsGuard` global
+      (cek permission live dari DB — efek langsung tanpa re-login),
+      seed script untuk bootstrap role superadmin.
 - [ ] **Phase 4 — Profile Module** (CRUD + upload avatar + kompresi)
 - [ ] **Phase 5 — List Features** (pagination, search, sort, filter — DRY layer)
 - [ ] **Phase 6 — Frontend Svelte** (simulasi UI)

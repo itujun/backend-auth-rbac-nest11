@@ -35,6 +35,16 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
+   * Dipakai untuk operasi admin (mis. assign role) yang tidak perlu
+   * user harus dalam kondisi `isActive` — cukup belum di-soft-delete.
+   */
+  findById(id: number) {
+    return this.db.query.users.findFirst({
+      where: and(eq(users.id, id), isNull(users.deletedAt)),
+    });
+  }
+
+  /**
    * Insert `users` + `profiles` dalam SATU transaction.
    * Karena `profiles.user_id` NOT NULL UNIQUE (lihat ERD), user tanpa
    * profile adalah state yang tidak valid — kalau insert profile gagal,
