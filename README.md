@@ -66,6 +66,25 @@ di-paksa aktif lewat `ENABLE_SWAGGER=true` di `.env` (lihat
 `.env.example`) — misalnya kalau kamu memang ingin memamerkannya sebagai
 bagian dari portofolio publik.
 
+## Quality Checks (Lint & Type Check)
+
+Sebelum commit atau setelah menerapkan patch dari tiap tahap pengembangan,
+jalankan ketiganya:
+
+```bash
+npm run typecheck   # tsc --noEmit — pastikan tidak ada error tipe
+npm run lint         # ESLint (typescript-eslint recommendedTypeChecked)
+npm run test         # unit test (menyusul di Phase 6)
+```
+
+Catatan penting: `typecheck`/`lint` hanya akurat SETELAH `npm install`
+dijalankan ulang tiap kali ada dependency baru ditambahkan ke
+`package.json`. Kalau belum, editor/ESLint akan menampilkan banyak error
+palsu semacam `Unsafe call of a type that could not be resolved` — itu
+bukan bug di kode, tapi karena TypeScript belum bisa membaca tipe dari
+package yang belum ter-install (dianggap `any`, lalu ditangkap rule
+`@typescript-eslint/no-unsafe-*`).
+
 ## Script Database (Drizzle Kit)
 
 | Script              | Fungsi                                                        |
@@ -544,7 +563,9 @@ ini ikut ter-assign).
       sub-item (lihat checklist detail di bawah).
   - [x] Swagger/OpenAPI docs — **setup inti** (`/api/docs`, bearer auth,
         response envelope terdokumentasi lewat `ApiStandardResponse`)
-  - [ ] Swagger/OpenAPI docs — anotasi lengkap per modul (Auth → Users/Profiles → Roles/Permissions)
+  - [x] Swagger/OpenAPI docs — anotasi modul **Auth** (`@ApiTags`, `@ApiOperation`, `ApiStandardResponse` untuk register/login/refresh/me, DTO respons `UserResponseDto`/`LoginResponseDto`/`RefreshResponseDto`)
+  - [ ] Swagger/OpenAPI docs — anotasi modul Users/Profiles
+  - [ ] Swagger/OpenAPI docs — anotasi modul Roles/Permissions
   - [ ] Security hardening (Helmet, rate limiting, review cookie flags)
   - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
   - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
