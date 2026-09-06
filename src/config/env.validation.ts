@@ -33,6 +33,10 @@ export const envValidationSchema = Joi.object({
 
   // Swagger — opsional, default mengikuti NODE_ENV (lihat configuration.ts)
   ENABLE_SWAGGER: Joi.boolean().optional(),
+
+  // Rate limiting global (endpoint sensitif punya limit sendiri, lihat auth.controller.ts)
+  THROTTLE_TTL_MS: Joi.number().integer().positive().default(60000),
+  THROTTLE_LIMIT: Joi.number().integer().positive().default(100),
 }).unknown(true); // izinkan env lain (mis. dari OS/CI) yang tidak kita definisikan
 
 /**

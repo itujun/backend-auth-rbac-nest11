@@ -16,8 +16,10 @@ import {
   ApiOperation,
   ApiResponse,
   ApiTags,
+  ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -31,6 +33,25 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import type { SafeUser } from '../users/types/safe-user.type';
 import { UserResponseDto } from '../users/dto/user-response.dto';
 import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
+
+/**
+ * Limit khusus untuk endpoint rawan brute-force/credential-stuffing.
+ * Lebih ketat dari default global (lihat `throttle.limit`/`throttle.ttlMs`
+ * di configuration.ts).
+ *
+ * SENGAJA hardcoded di sini, bukan dibaca dari ConfigService seperti
+ * limit global: `@Throttle()` adalah decorator, nilainya di-resolve saat
+ * class DIDEFINISIKAN (load time), jauh sebelum Nest membuat instance
+ * `ConfigService` lewat dependency injection saat runtime. Kalau memang
+ * perlu configurable per environment, alternatifnya pakai custom
+ * `ThrottlerGuard` yang override `getTracker()`/`getLimit()` — di luar
+ * scope latihan ini.
+ */
+const AUTH_THROTTLE = { default: { limit: 5, ttl: 60_000 } };
+
+/** Sedikit lebih longgar dari AUTH_THROTTLE — refresh wajar dipanggil
+ * lebih sering oleh client legit (mis. beberapa tab browser sekaligus). */
+const REFRESH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -49,6 +70,7 @@ export class AuthController {
 
   @Public()
   @Post('register')
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({
     summary: 'Registrasi user baru',
     description: 'Otomatis membuat profile kosong via transaction.',
@@ -58,6 +80,9 @@ export class AuthController {
     description: 'Registrasi berhasil',
   })
   @ApiConflictResponse({ description: 'Email sudah terdaftar' })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
+  })
   @ResponseMessage('Registrasi berhasil')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -66,6 +91,7 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK) // default NestJS untuk POST adalah 201, login lebih tepat 200
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({
     summary: 'Login',
     description:
@@ -75,6 +101,9 @@ export class AuthController {
   @ApiStandardResponse(LoginResponseDto, { description: 'Login berhasil' })
   @ApiUnauthorizedResponse({
     description: 'Email/password salah, atau akun tidak aktif',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
   })
   @ResponseMessage('Login berhasil')
   async login(
@@ -98,6 +127,7 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle(REFRESH_THROTTLE)
   @ApiOperation({
     summary: 'Perbarui access token',
     description:
@@ -110,6 +140,9 @@ export class AuthController {
   @ApiUnauthorizedResponse({
     description:
       'Refresh token tidak ada / invalid / kadaluarsa / sudah dipakai',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 10/menit)',
   })
   @ResponseMessage('Token berhasil diperbarui')
   async refresh(

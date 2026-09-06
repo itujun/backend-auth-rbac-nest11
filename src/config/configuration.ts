@@ -31,6 +31,14 @@ export default () => ({
   storage: {
     uploadDir: process.env.UPLOAD_DIR ?? 'uploads',
   },
+  throttle: {
+    // Default global — endpoint sensitif (login/register/refresh) override
+    // sendiri lewat @Throttle() langsung di controller (lihat komentar di
+    // auth.controller.ts kenapa itu TIDAK bisa dibuat configurable lewat
+    // env seperti ini).
+    ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT ?? '100', 10),
+  },
 });
 
 export type AppConfig = ReturnType<typeof import('./configuration').default>;

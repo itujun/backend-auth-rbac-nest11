@@ -85,6 +85,42 @@ bukan bug di kode, tapi karena TypeScript belum bisa membaca tipe dari
 package yang belum ter-install (dianggap `any`, lalu ditangkap rule
 `@typescript-eslint/no-unsafe-*`).
 
+## Security Hardening
+
+**Helmet** — menambah header keamanan HTTP standar (`X-Content-Type-Options`,
+`X-Frame-Options`, `Strict-Transport-Security`, dst). Dua penyesuaian dari
+default, keduanya karena app ini sengaja cross-origin (frontend terpisah,
+avatar disajikan sebagai static file) — detail lengkap ada di komentar
+`main.ts`:
+- `contentSecurityPolicy` dimatikan HANYA saat Swagger aktif (CSP default
+  akan bikin halaman `/api/docs` blank).
+- `crossOriginResourcePolicy` di-set `cross-origin` supaya frontend di
+  origin lain (mis. `localhost:5173`) bisa menampilkan `<img>` avatar dari
+  `/uploads/...`.
+
+**Rate limiting** (`@nestjs/throttler`) — dua lapis:
+1. Global: `THROTTLE_LIMIT` request per `THROTTLE_TTL_MS` per IP (default
+   100 req/menit), berlaku ke semua endpoint.
+2. Lebih ketat khusus endpoint rawan brute-force/credential-stuffing:
+   `POST /auth/register` & `POST /auth/login` (5/menit), `POST
+   /auth/refresh` (10/menit) — di-set langsung lewat `@Throttle()` di
+   `auth.controller.ts` (lihat komentar di sana kenapa ini tidak lewat
+   env seperti limit global).
+
+Rate limiting sudah otomatis diaplikasikan sebagai guard GLOBAL
+(`ThrottlerGuard` via `APP_GUARD` di `app.module.ts`), didaftarkan
+PALING AWAL — sebelum `JwtAuthGuard`/`PermissionsGuard` — supaya request
+yang bakal ditolak rate limiter tidak perlu ikut memproses autentikasi
+yang lebih mahal.
+
+`GET /health` sengaja dikecualikan (`@SkipThrottle()`) karena wajar
+di-ping sangat sering oleh uptime monitor/load balancer.
+
+**Cookie flags** (refresh token) — sudah benar sejak awal implementasi
+(lihat `RefreshCookieHelper`): `httpOnly` (tidak bisa diakses JS di
+browser), `secure` (wajib HTTPS) otomatis aktif kalau `NODE_ENV=production`,
+`sameSite: 'lax'`, dan `path` dibatasi ke `/api/auth` saja.
+
 ## Script Database (Drizzle Kit)
 
 | Script              | Fungsi                                                        |
@@ -571,7 +607,7 @@ ini ikut ter-assign).
         dipindah ke `PartialType` dari `@nestjs/swagger` (bukan
         `@nestjs/mapped-types`) supaya field opsional ikut terefleksi di
         dokumentasi OpenAPI, dependency lama dihapus.
-  - [ ] Security hardening (Helmet, rate limiting, review cookie flags)
+  - [x] Security hardening — Helmet (header keamanan, CSP dimatikan khusus saat Swagger aktif, CORP `cross-origin` untuk avatar), rate limiting global via `@nestjs/throttler` + limit lebih ketat khusus di `/auth/register`, `/auth/login`, `/auth/refresh`. Cookie flags (httpOnly/secure/sameSite) sudah benar sejak awal (lihat `RefreshCookieHelper`).
   - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
   - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
   - [ ] Audit log module (login attempt, CRUD role/permission/profile)
