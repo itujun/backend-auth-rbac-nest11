@@ -8,6 +8,14 @@ export default () => ({
     env: process.env.NODE_ENV ?? 'development',
     port: parseInt(process.env.PORT ?? '3000', 10),
     corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+    // Default: aktif di semua environment SELAIN production. Di production
+    // tetap bisa dipaksa aktif via ENABLE_SWAGGER=true kalau memang perlu
+    // (mis. portofolio yang sengaja dipamerkan publik) — tapi sadari
+    // konsekuensinya: seluruh shape API (termasuk DTO) jadi ter-expose.
+    swaggerEnabled:
+      process.env.ENABLE_SWAGGER !== undefined
+        ? process.env.ENABLE_SWAGGER === 'true'
+        : process.env.NODE_ENV !== 'production',
   },
   database: {
     url: process.env.DATABASE_URL,

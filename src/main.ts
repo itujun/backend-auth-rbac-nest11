@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { setupSwagger } from './config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -53,6 +54,10 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor(app.get(Reflector)));
 
   app.setGlobalPrefix('api');
+
+  // Panggil SETELAH setGlobalPrefix supaya urutan bootstrap konsisten,
+  // walau path Swagger UI di-set literal (lihat komentar di swagger.config.ts).
+  setupSwagger(app);
 
   const port = configService.get<number>('app.port') ?? 3000;
   await app.listen(port);

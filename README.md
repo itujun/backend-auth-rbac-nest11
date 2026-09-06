@@ -9,6 +9,7 @@ repository pattern, dan standard API response.
 - **Backend**: NestJS 11 + TypeScript
 - **ORM**: Drizzle ORM (PostgreSQL)
 - **Auth**: JWT (access token) + refresh token via httpOnly cookie, rotasi & revoke
+- **API Docs**: Swagger/OpenAPI (`@nestjs/swagger`) di `/api/docs`
 - **Frontend**: Svelte (simulasi UI untuk testing fitur backend)
 
 ## Cara Menjalankan (Development)
@@ -41,6 +42,30 @@ repository pattern, dan standard API response.
    Server jalan di `http://localhost:3000/api`. Cek `GET /api/health` untuk
    memastikan semua beres.
 
+## Dokumentasi API (Swagger)
+
+Buka **`http://localhost:3000/api/docs`** untuk dokumentasi interaktif
+seluruh endpoint.
+
+Cara coba endpoint yang butuh login lewat Swagger UI:
+1. Jalankan `POST /auth/register`, lalu `POST /auth/login` langsung dari
+   Swagger UI.
+2. Salin `accessToken` dari response `login`.
+3. Klik tombol **Authorize** (kanan atas), tempel token (tanpa prefix
+   `Bearer `), lalu **Authorize**.
+4. Semua endpoint protected sekarang otomatis terkirim header
+   `Authorization: Bearer <token>`.
+
+Catatan: `refreshToken` sengaja **tidak pernah** muncul di body response
+(hanya via httpOnly cookie), jadi endpoint `/auth/refresh` dan
+`/auth/logout` yang bergantung pada cookie tersebut lebih gampang dites
+lewat Postman/browser daripada Swagger UI.
+
+Swagger otomatis **nonaktif** kalau `NODE_ENV=production`, kecuali
+di-paksa aktif lewat `ENABLE_SWAGGER=true` di `.env` (lihat
+`.env.example`) — misalnya kalau kamu memang ingin memamerkannya sebagai
+bagian dari portofolio publik.
+
 ## Script Database (Drizzle Kit)
 
 | Script              | Fungsi                                                        |
@@ -59,7 +84,8 @@ src/
     filters/       # AllExceptionsFilter (format error konsisten)
     interceptors/  # ResponseInterceptor (format response konsisten)
     interfaces/     # Kontrak tipe bersama (ApiResponse, PaginatedResult)
-  config/          # Konfigurasi terpusat + validasi env (fail-fast)
+    swagger/        # Model & decorator dokumentasi (ApiStandardResponse)
+  config/          # Konfigurasi terpusat + validasi env (fail-fast) + setup Swagger
   core/
     repositories/  # BaseRepository — DI wiring dasar untuk semua repository
   database/
@@ -155,6 +181,15 @@ src/
   `@RequirePermission`, membuktikan pola yang sama dari Phase 3 bisa
   dipakai ulang di modul manapun tanpa perubahan pada
   `AuthorizationModule`/`PermissionsGuard`.
+- **Swagger mendokumentasikan response ASLI, bukan DTO mentah**:
+  `ResponseInterceptor` membungkus semua response sukses jadi
+  `{ success, statusCode, message, data, meta?, timestamp, path }`.
+  Kalau Swagger cuma diberi tahu tipe `data`-nya, dokumentasi jadi
+  menyesatkan. Solusinya: decorator `ApiStandardResponse(dto, opts)` di
+  `common/swagger/` membungkus schema `dto` di dalam model
+  `ApiSuccessEnvelope` lewat `allOf` + `getSchemaPath` (pola resmi
+  NestJS untuk generic response di Swagger), dengan opsi `isArray`/
+  `paginated` untuk endpoint list.
 - **Pagination/search/sort/filter TANPA generic query builder**: sama
   seperti filosofi `BaseRepository`, tidak ada satu "list engine" ajaib
   yang tahu segalanya. DRY dicapai di 2 titik kecil: (1) `PaginationQueryDto`
@@ -503,6 +538,17 @@ ini ikut ter-assign).
       `GET /roles`, `GET /permissions`. Whitelist kolom sort per
       resource, filter `isActive` khusus users, terhubung otomatis ke
       `meta` di response envelope lewat `PaginatedResult<T>`.
-- [ ] **Phase 6 — Frontend Svelte** (simulasi UI)
-- [ ] **Phase 6 — Frontend Svelte** (simulasi UI)
-- [ ] **Phase 7 — Extras** (Swagger, rate limiting, tests, dll — opsional)
+- [ ] **Phase 6 — Production-Readiness Extras**
+      Scope tambahan di luar rencana awal, ditambahkan supaya project ini
+      layak dijadikan portofolio & siap-deploy. Dikerjakan bertahap per
+      sub-item (lihat checklist detail di bawah).
+  - [x] Swagger/OpenAPI docs — **setup inti** (`/api/docs`, bearer auth,
+        response envelope terdokumentasi lewat `ApiStandardResponse`)
+  - [ ] Swagger/OpenAPI docs — anotasi lengkap per modul (Auth → Users/Profiles → Roles/Permissions)
+  - [ ] Security hardening (Helmet, rate limiting, review cookie flags)
+  - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
+  - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
+  - [ ] Audit log module (login attempt, CRUD role/permission/profile)
+  - [ ] CI pipeline (GitHub Actions: lint → test → build)
+  - [ ] Dockerfile production (multi-stage build)
+- [ ] **Phase 7 — Frontend Svelte** (simulasi UI untuk testing manual seluruh fitur backend)

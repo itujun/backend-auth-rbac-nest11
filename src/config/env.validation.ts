@@ -30,6 +30,9 @@ export const envValidationSchema = Joi.object({
 
   // CORS
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
+
+  // Swagger — opsional, default mengikuti NODE_ENV (lihat configuration.ts)
+  ENABLE_SWAGGER: Joi.boolean().optional(),
 }).unknown(true); // izinkan env lain (mis. dari OS/CI) yang tidak kita definisikan
 
 /**
