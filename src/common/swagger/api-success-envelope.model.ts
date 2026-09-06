@@ -32,7 +32,7 @@ export class ApiSuccessEnvelope {
   @ApiProperty({
     required: false,
     description: 'Hanya muncul di endpoint list (pagination).',
-    example: { page: 1, limit: 10, total: 42, totalPages: 5 },
+    example: { page: 1, limit: 10, totalItems: 42, totalPages: 5 },
   })
   meta?: Record<string, unknown>;
 

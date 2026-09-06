@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * Base DTO untuk semua endpoint list. Resource-specific query DTO
@@ -8,12 +9,14 @@ import { IsInt, IsOptional, Max, Min } from 'class-validator';
  * validasi page/limit di tiap tempat (DRY).
  */
 export class PaginationQueryDto {
+  @ApiPropertyOptional({ minimum: 1, default: 1 })
   @IsOptional()
   @Type(() => Number) // query string selalu string mentah, perlu di-convert manual ke number
   @IsInt()
   @Min(1)
   page: number = 1;
 
+  @ApiPropertyOptional({ minimum: 1, maximum: 100, default: 10 })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

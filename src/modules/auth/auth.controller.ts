@@ -108,7 +108,8 @@ export class AuthController {
     description: 'Token berhasil diperbarui',
   })
   @ApiUnauthorizedResponse({
-    description: 'Refresh token tidak ada / invalid / kadaluarsa / sudah dipakai',
+    description:
+      'Refresh token tidak ada / invalid / kadaluarsa / sudah dipakai',
   })
   @ResponseMessage('Token berhasil diperbarui')
   async refresh(

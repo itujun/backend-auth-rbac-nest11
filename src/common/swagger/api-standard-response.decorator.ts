@@ -34,7 +34,12 @@ export function ApiStandardResponse<TModel extends Type<unknown>>(
   model: TModel,
   options: ApiStandardResponseOptions = {},
 ) {
-  const { status = 200, description, isArray = false, paginated = false } = options;
+  const {
+    status = 200,
+    description,
+    isArray = false,
+    paginated = false,
+  } = options;
   const dataIsArray = isArray || paginated;
 
   return applyDecorators(

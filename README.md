@@ -564,7 +564,7 @@ ini ikut ter-assign).
   - [x] Swagger/OpenAPI docs — **setup inti** (`/api/docs`, bearer auth,
         response envelope terdokumentasi lewat `ApiStandardResponse`)
   - [x] Swagger/OpenAPI docs — anotasi modul **Auth** (`@ApiTags`, `@ApiOperation`, `ApiStandardResponse` untuk register/login/refresh/me, DTO respons `UserResponseDto`/`LoginResponseDto`/`RefreshResponseDto`)
-  - [ ] Swagger/OpenAPI docs — anotasi modul Users/Profiles
+  - [x] Swagger/OpenAPI docs — anotasi modul **Users** & **Profiles** (query pagination/search/filter/sort terdokumentasi, upload avatar via `@ApiConsumes('multipart/form-data')`, DTO respons `ProfileResponseDto`)
   - [ ] Swagger/OpenAPI docs — anotasi modul Roles/Permissions
   - [ ] Security hardening (Helmet, rate limiting, review cookie flags)
   - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
