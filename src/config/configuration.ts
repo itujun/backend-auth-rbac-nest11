@@ -20,6 +20,9 @@ export default () => ({
   cookie: {
     refreshTokenName: process.env.REFRESH_TOKEN_COOKIE_NAME ?? 'refresh_token',
   },
+  storage: {
+    uploadDir: process.env.UPLOAD_DIR ?? 'uploads',
+  },
 });
 
 export type AppConfig = ReturnType<typeof import('./configuration').default>;

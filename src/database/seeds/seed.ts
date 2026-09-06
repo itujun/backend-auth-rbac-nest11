@@ -49,6 +49,14 @@ const BASELINE_PERMISSIONS: Array<{ name: string; description: string }> = [
   { name: 'permission:read', description: 'Melihat daftar/detail permission' },
   { name: 'permission:update', description: 'Mengubah permission' },
   { name: 'permission:delete', description: 'Menghapus permission' },
+  {
+    name: 'profile:read',
+    description: 'Melihat profile user lain (admin)',
+  },
+  {
+    name: 'profile:update',
+    description: 'Mengubah profile user lain (admin)',
+  },
 ];
 
 const SUPERADMIN_ROLE_NAME = 'superadmin';

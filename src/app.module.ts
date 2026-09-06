@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AuthorizationModule } from './core/authorization/authorization.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { ProfilesModule } from './modules/profiles/profiles.module';
 
 @Module({
   imports: [
@@ -30,7 +31,7 @@ import { RolesModule } from './modules/roles/roles.module';
     AuthorizationModule,
     PermissionsModule,
     RolesModule,
-    // Feature module (profile) akan didaftarkan mulai Phase 4.
+    ProfilesModule,
   ],
   controllers: [AppController],
   providers: [],

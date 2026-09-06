@@ -133,6 +133,28 @@ src/
   role/permission pertama tanpa lewat API (chicken-and-egg problem).
   `npm run db:seed` membuat baseline permission + role `superadmin`,
   dan bisa meng-assign-nya ke user tertentu lewat env `SEED_ADMIN_EMAIL`.
+- **Avatar diproses di memory, ditulis ke disk sekali**: upload avatar
+  pakai `multer` dengan `memoryStorage()` (bukan simpan file mentah ke
+  disk dulu) — buffer langsung diproses `sharp` (resize 512×512 +
+  convert ke WebP kualitas 80) baru ditulis final ke disk. Hasilnya:
+  kompresi signifikan (contoh nyata saat testing: JPEG 8.7KB jadi
+  WebP 554 byte, ~94% lebih kecil) dan format seragam apapun input-nya
+  (JPEG/PNG/WebP).
+- **File avatar lama otomatis dihapus** setiap kali avatar diganti
+  atau direset ke default — mencegah file sampah menumpuk di disk.
+  Default avatar sendiri TIDAK PERNAH ikut terhapus (dicek eksplisit
+  lewat pencocokan URL di `AvatarStorageService.deleteIfCustom()`).
+- **Default avatar dibundel sebagai asset**, bukan cuma string path di
+  DB — `nest-cli.json` dikonfigurasi untuk ikut meng-copy
+  `default-avatar.png` ke `dist/` saat build, lalu `AvatarStorageService`
+  meng-copy-nya ke folder `uploads/avatars/` saat aplikasi start
+  (kalau belum ada). Jadi endpoint `/uploads/avatars/default.png`
+  selalu bisa diakses sejak first boot, tanpa perlu upload manual.
+- **`profile:read`/`profile:update` sebagai contoh integrasi RBAC lintas
+  modul**: endpoint admin `GET/PATCH /profiles/:userId` dilindungi
+  `@RequirePermission`, membuktikan pola yang sama dari Phase 3 bisa
+  dipakai ulang di modul manapun tanpa perubahan pada
+  `AuthorizationModule`/`PermissionsGuard`.
 
 ## Bug Nyata yang Ditemukan Saat Testing: Urutan APP_GUARD
 
@@ -294,6 +316,51 @@ request berikutnya — tidak perlu logout/login ulang, karena permission
 dicek live dari database (lihat penjelasan di bagian "Kenapa
 strukturnya begini?").
 
+## API Endpoints (Phase 4 — Profile)
+
+### Self-service (semua user login, tanpa permission khusus)
+
+| Method | Endpoint                  | Deskripsi                                  |
+| ------ | --------------------------- | --------------------------------------------- |
+| GET    | `/api/profile/me`            | Lihat profile milik sendiri                  |
+| PATCH  | `/api/profile/me`            | Update `fullName`/`phone`/`bio` milik sendiri |
+| POST   | `/api/profile/me/avatar`     | Upload avatar (multipart, field `avatar`)    |
+| DELETE | `/api/profile/me/avatar`     | Reset avatar ke default                      |
+
+### Admin (butuh permission)
+
+| Method | Endpoint                  | Permission        | Deskripsi                       |
+| ------ | --------------------------- | -------------------- | ----------------------------------- |
+| GET    | `/api/profiles/:userId`      | `profile:read`        | Lihat profile user manapun         |
+| PATCH  | `/api/profiles/:userId`      | `profile:update`      | Ubah profile user manapun (tanpa avatar) |
+
+Batasan upload: maksimal 5MB, format JPEG/PNG/WebP saja (ditolak `415`
+kalau format lain). Hasil akhir SELALU WebP 512×512 apapun format/ukuran
+aslinya.
+
+Contoh:
+```bash
+# Lihat profile sendiri
+curl http://localhost:3000/api/profile/me -H "Authorization: Bearer <accessToken>"
+
+# Update field profile
+curl -X PATCH http://localhost:3000/api/profile/me \
+  -H "Authorization: Bearer <accessToken>" -H "Content-Type: application/json" \
+  -d '{"fullName":"Budi Santoso","phone":"081234567890","bio":"Backend developer"}'
+
+# Upload avatar
+curl -X POST http://localhost:3000/api/profile/me/avatar \
+  -H "Authorization: Bearer <accessToken>" \
+  -F "avatar=@/path/ke/foto.jpg;type=image/jpeg"
+
+# Reset avatar ke default
+curl -X DELETE http://localhost:3000/api/profile/me/avatar \
+  -H "Authorization: Bearer <accessToken>"
+
+# Akses gambar avatar langsung (URL didapat dari response di atas)
+curl http://localhost:3000/uploads/avatars/user-3-xxxx.webp -o avatar.webp
+```
+
 ## Progress Roadmap
 
 - [x] **Phase 0 — Fondasi & Arsitektur**
@@ -313,7 +380,11 @@ strukturnya begini?").
       role ke user, `@RequirePermission()` + `PermissionsGuard` global
       (cek permission live dari DB — efek langsung tanpa re-login),
       seed script untuk bootstrap role superadmin.
-- [ ] **Phase 4 — Profile Module** (CRUD + upload avatar + kompresi)
+- [x] **Phase 4 — Profile Module**
+      CRUD profile self-service + admin (integrasi RBAC), upload avatar
+      dengan kompresi otomatis (resize 512×512 + convert WebP via
+      sharp), cleanup file lama otomatis, default avatar dibundel &
+      di-copy saat first boot, static file serving di `/uploads/*`.
 - [ ] **Phase 5 — List Features** (pagination, search, sort, filter — DRY layer)
 - [ ] **Phase 6 — Frontend Svelte** (simulasi UI)
 - [ ] **Phase 7 — Extras** (Swagger, rate limiting, tests, dll — opsional)

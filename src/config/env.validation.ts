@@ -25,6 +25,9 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   REFRESH_TOKEN_COOKIE_NAME: Joi.string().default('refresh_token'),
 
+  // Storage (upload avatar)
+  UPLOAD_DIR: Joi.string().default('uploads'),
+
   // CORS
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
 }).unknown(true); // izinkan env lain (mis. dari OS/CI) yang tidak kita definisikan
