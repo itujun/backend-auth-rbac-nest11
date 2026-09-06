@@ -8,11 +8,13 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import { RolesService } from './roles.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { SyncRolePermissionsDto } from './dto/sync-role-permissions.dto';
+import { FindRolesQueryDto } from './dto/find-roles-query.dto';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
@@ -23,8 +25,8 @@ export class RolesController {
   @Get()
   @RequirePermission('role:read')
   @ResponseMessage('Daftar role berhasil diambil')
-  findAll() {
-    return this.rolesService.findAll();
+  findAll(@Query() query: FindRolesQueryDto) {
+    return this.rolesService.findAll(query);
   }
 
   @Get(':id')

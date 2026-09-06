@@ -34,7 +34,18 @@ async function bootstrap() {
       whitelist: true, // buang field yang tidak ada di DTO
       forbidNonWhitelisted: true, // tolak request kalau ada field asing
       transform: true, // auto-transform payload jadi instance DTO (+ tipe primitif)
-      transformOptions: { enableImplicitConversion: true },
+      // enableImplicitConversion SENGAJA dimatikan (default: false).
+      // Kalau diaktifkan, class-transformer melakukan konversi tipe
+      // "implisit" berdasarkan reflected TypeScript type — untuk
+      // boolean ini artinya `Boolean(value)`, yang SALAH untuk query
+      // string: `Boolean("false")` hasilnya `true` (string non-kosong
+      // selalu truthy di JS)! Ini bug nyata yang ketemu saat testing
+      // Phase 5 (filter `?isActive=false` malah balik semua yang aktif).
+      // Solusinya: semua konversi tipe query param HARUS eksplisit
+      // lewat @Type()/@Transform() di DTO masing-masing (lihat
+      // PaginationQueryDto, FindUsersQueryDto), bukan mengandalkan
+      // "sihir" implicit conversion ini.
+      transformOptions: { enableImplicitConversion: false },
     }),
   );
 

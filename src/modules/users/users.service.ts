@@ -5,10 +5,15 @@ import {
 } from './users.repository';
 import { User } from '../../database/schema';
 import { SafeUser } from './types/safe-user.type';
+import { FindUsersQueryDto } from './dto/find-users-query.dto';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly usersRepository: UsersRepository) {}
+
+  findAll(query: FindUsersQueryDto) {
+    return this.usersRepository.findAll(query);
+  }
 
   findByEmail(email: string) {
     return this.usersRepository.findByEmail(email);

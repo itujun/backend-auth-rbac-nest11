@@ -155,6 +155,61 @@ src/
   `@RequirePermission`, membuktikan pola yang sama dari Phase 3 bisa
   dipakai ulang di modul manapun tanpa perubahan pada
   `AuthorizationModule`/`PermissionsGuard`.
+- **Pagination/search/sort/filter TANPA generic query builder**: sama
+  seperti filosofi `BaseRepository`, tidak ada satu "list engine" ajaib
+  yang tahu segalanya. DRY dicapai di 2 titik kecil: (1) `PaginationQueryDto`
+  yang di-extend tiap resource (`FindUsersQueryDto`, `FindRolesQueryDto`,
+  dst) untuk `page`/`limit`, ditambah field `search`/`sortBy`/`sortOrder`/
+  filter miliknya sendiri; (2) helper `paginate()` yang menyeragamkan
+  pola "jalankan query count & data secara paralel, bentuk objek `meta`".
+  Tiap repository TETAP menulis `where`/`orderBy` sendiri secara eksplisit
+  dan type-safe. `sortBy` divalidasi lewat whitelist (`@IsIn([...])`),
+  BUKAN menerima nama kolom bebas dari client — mencegah client
+  mengintip/mengeksploitasi nama kolom internal yang tidak dimaksudkan
+  untuk publik.
+- **`PaginatedResult<T>` terhubung otomatis ke response envelope**:
+  `ResponseInterceptor` (dibuat sejak Phase 0!) sudah mendeteksi shape
+  `{ items, meta }` dan membongkarnya jadi `data` + `meta` di level atas
+  response — controller yang pakai `paginate()` tidak perlu tahu/berubah
+  sama sekali soal pembentukan response, cukup `return` hasil repository
+  apa adanya.
+
+## Bug Nyata yang Ditemukan Saat Testing: MIME Type Spoofing pada Upload Avatar
+
+Saat testing manual Phase 4, upload file `.ts` yang di-rename ekstensinya
+jadi `.jpg` menghasilkan `500 Internal Server Error` (dengan stack trace
+`sharp` bocor ke response), bukan `415` seperti upload file jenis lain
+yang jelas-jelas salah (mis. PDF).
+
+**Root cause**: `file.mimetype` yang dibaca `multer` berasal dari header
+`Content-Type` yang **diklaim client** di request multipart — BUKAN
+dideteksi dari isi file. Client (browser/curl/script) bebas mengklaim
+`Content-Type: image/jpeg` untuk file apapun, termasuk source code yang
+sekadar di-rename ekstensinya. Validasi awal (`ALLOWED_MIME_TYPES.includes(mimetype)`)
+lolos karena klaim-nya "benar", padahal isinya bukan gambar — lalu
+`sharp` gagal decode buffer tersebut dan melempar `Error` biasa (bukan
+`HttpException`), yang jatuh ke fallback 500 di `AllExceptionsFilter`.
+
+**Prinsip yang dilanggar**: jangan pernah percaya `Content-Type`/MIME
+type yang diklaim client untuk keputusan validasi keamanan — itu input
+yang sepenuhnya dikontrol attacker. Validasi yang benar harus membaca
+**isi file sesungguhnya**.
+
+**Fix** di `AvatarStorageService.saveAvatar()`:
+1. Cek `mimetype` klaim client tetap dipertahankan sebagai fast-fail
+   murah (menolak kesalahan jujur lebih awal dengan pesan jelas).
+2. Ditambah verifikasi SESUNGGUHNYA: `sharp(buffer).metadata()` membaca
+   magic bytes file dan melaporkan format asli yang terdeteksi dari
+   isinya. Kalau tidak bisa dibaca sama sekali, atau formatnya di luar
+   allow-list (`jpeg`/`png`/`webp`), request ditolak `415` — walau
+   client mengklaim Content-Type yang "benar".
+3. Proses kompresi (`resize`+`webp`) juga dibungkus try/catch terpisah
+   sebagai defense-in-depth, untuk kasus file corrupt yang lolos
+   `metadata()` tapi gagal di decode penuh.
+
+Hasilnya: SEMUA jalur kegagalan dari `sharp` sekarang dipetakan ke
+`UnsupportedMediaTypeException` (415, kesalahan client) alih-alih
+bocor sebagai 500 (yang seharusnya berarti "bug internal server").
 
 ## Bug Nyata yang Ditemukan Saat Testing: Urutan APP_GUARD
 
@@ -361,6 +416,63 @@ curl -X DELETE http://localhost:3000/api/profile/me/avatar \
 curl http://localhost:3000/uploads/avatars/user-3-xxxx.webp -o avatar.webp
 ```
 
+## API Endpoints (Phase 5 — List Features)
+
+Semua endpoint list (`GET /users`, `GET /roles`, `GET /permissions`)
+menerima query parameter berikut:
+
+| Param       | Tipe               | Default      | Keterangan                                     |
+| ----------- | -------------------- | -------------- | ------------------------------------------------- |
+| `page`      | integer (≥1)          | `1`            | Halaman ke berapa                                 |
+| `limit`     | integer (1–100)       | `10`           | Jumlah item per halaman (dibatasi maks. 100)      |
+| `search`    | string                | -              | Pencarian bebas (`ILIKE`, case-insensitive)       |
+| `sortBy`    | enum (beda per resource) | beda per resource | Kolom sort — divalidasi lewat whitelist            |
+| `sortOrder` | `asc` \| `desc`       | beda per resource | Arah sort                                         |
+
+Kolom yang bisa di-`search`/`sortBy` per resource:
+
+| Resource      | `search` mencocokkan | `sortBy` yang diizinkan   |
+| ------------- | ----------------------- | ---------------------------- |
+| `/users`      | `email`                  | `email`, `createdAt`         |
+| `/roles`      | `name`, `description`    | `name`, `createdAt`          |
+| `/permissions`| `name`, `description`    | `name`, `createdAt`          |
+
+`GET /users` juga menerima filter tambahan `isActive=true|false`.
+
+Response list SELALU membawa `meta` di level atas:
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Daftar user berhasil diambil",
+  "data": [ /* array item */ ],
+  "meta": { "page": 1, "limit": 10, "totalItems": 42, "totalPages": 5 },
+  "timestamp": "...",
+  "path": "/api/users"
+}
+```
+
+Contoh:
+```bash
+# Halaman 2, 20 item per halaman
+curl "http://localhost:3000/api/users?page=2&limit=20" -H "Authorization: Bearer <accessToken>"
+
+# Cari user dengan email mengandung "budi", urutkan berdasarkan email A-Z
+curl "http://localhost:3000/api/users?search=budi&sortBy=email&sortOrder=asc" -H "Authorization: Bearer <accessToken>"
+
+# Hanya user yang tidak aktif
+curl "http://localhost:3000/api/users?isActive=false" -H "Authorization: Bearer <accessToken>"
+
+# Cari role/permission
+curl "http://localhost:3000/api/roles?search=admin" -H "Authorization: Bearer <accessToken>"
+curl "http://localhost:3000/api/permissions?search=role" -H "Authorization: Bearer <accessToken>"
+```
+
+`GET /users` butuh permission `user:read` (sudah otomatis dimiliki
+`superadmin` lewat seed script — jalankan ulang `npm run db:seed`
+kalau superadmin kamu dibuat sebelum Phase 5 supaya permission baru
+ini ikut ter-assign).
+
 ## Progress Roadmap
 
 - [x] **Phase 0 — Fondasi & Arsitektur**
@@ -385,6 +497,12 @@ curl http://localhost:3000/uploads/avatars/user-3-xxxx.webp -o avatar.webp
       dengan kompresi otomatis (resize 512×512 + convert WebP via
       sharp), cleanup file lama otomatis, default avatar dibundel &
       di-copy saat first boot, static file serving di `/uploads/*`.
-- [ ] **Phase 5 — List Features** (pagination, search, sort, filter — DRY layer)
+- [x] **Phase 5 — List Features**
+      Pagination + search + sort + filter reusable (`PaginationQueryDto`
+      + helper `paginate()`) dipasang di `GET /users` (endpoint baru),
+      `GET /roles`, `GET /permissions`. Whitelist kolom sort per
+      resource, filter `isActive` khusus users, terhubung otomatis ke
+      `meta` di response envelope lewat `PaginatedResult<T>`.
+- [ ] **Phase 6 — Frontend Svelte** (simulasi UI)
 - [ ] **Phase 6 — Frontend Svelte** (simulasi UI)
 - [ ] **Phase 7 — Extras** (Swagger, rate limiting, tests, dll — opsional)

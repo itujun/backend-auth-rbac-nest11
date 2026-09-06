@@ -1,16 +1,50 @@
 import { Injectable } from '@nestjs/common';
-import { asc, eq } from 'drizzle-orm';
+import { asc, count, desc, eq, ilike, or, type SQL } from 'drizzle-orm';
 import { BaseRepository } from '../../core/repositories/base.repository';
 import { roles } from '../../database/schema';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
+import { FindRolesQueryDto } from './dto/find-roles-query.dto';
+import { paginate, toOffset } from '../../common/utils/pagination.util';
+
+const SORT_COLUMN_MAP = {
+  name: roles.name,
+  createdAt: roles.createdAt,
+} as const;
 
 @Injectable()
 export class RolesRepository extends BaseRepository {
-  findAll() {
-    return this.db.query.roles.findMany({
-      orderBy: asc(roles.name),
+  findAll(query: FindRolesQueryDto) {
+    const { page, limit, search, sortBy, sortOrder } = query;
+
+    // `undefined` di sini berarti "tidak ada filter" — drizzle
+    // memperbolehkan `where(undefined)` (artinya WHERE dilewati sama
+    // sekali), jadi tidak perlu percabangan if/else terpisah.
+    const whereClause: SQL | undefined = search
+      ? or(
+          ilike(roles.name, `%${search}%`),
+          ilike(roles.description, `%${search}%`),
+        )
+      : undefined;
+
+    const orderColumn = SORT_COLUMN_MAP[sortBy];
+    const orderClause =
+      sortOrder === 'desc' ? desc(orderColumn) : asc(orderColumn);
+
+    const dataQuery = this.db.query.roles.findMany({
+      where: whereClause,
+      orderBy: orderClause,
+      limit,
+      offset: toOffset(page, limit),
     });
+
+    const countQuery = this.db
+      .select({ value: count() })
+      .from(roles)
+      .where(whereClause)
+      .then((rows) => rows[0]?.value ?? 0);
+
+    return paginate(dataQuery, countQuery, { page, limit });
   }
 
   findById(id: number) {

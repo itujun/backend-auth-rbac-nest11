@@ -7,10 +7,12 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { PermissionsService } from './permissions.service';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { FindPermissionsQueryDto } from './dto/find-permissions-query.dto';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 
@@ -21,8 +23,8 @@ export class PermissionsController {
   @Get()
   @RequirePermission('permission:read')
   @ResponseMessage('Daftar permission berhasil diambil')
-  findAll() {
-    return this.permissionsService.findAll();
+  findAll(@Query() query: FindPermissionsQueryDto) {
+    return this.permissionsService.findAll(query);
   }
 
   @Get(':id')

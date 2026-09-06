@@ -33,6 +33,7 @@ import {
  */
 
 const BASELINE_PERMISSIONS: Array<{ name: string; description: string }> = [
+  { name: 'user:read', description: 'Melihat daftar user (admin)' },
   { name: 'role:create', description: 'Membuat role baru' },
   { name: 'role:read', description: 'Melihat daftar/detail role' },
   { name: 'role:update', description: 'Mengubah role' },

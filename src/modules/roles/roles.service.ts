@@ -11,6 +11,7 @@ import { UsersService } from '../users/users.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { SyncRolePermissionsDto } from './dto/sync-role-permissions.dto';
+import { FindRolesQueryDto } from './dto/find-roles-query.dto';
 
 @Injectable()
 export class RolesService {
@@ -22,8 +23,8 @@ export class RolesService {
     private readonly usersService: UsersService,
   ) {}
 
-  findAll() {
-    return this.rolesRepository.findAll();
+  findAll(query: FindRolesQueryDto) {
+    return this.rolesRepository.findAll(query);
   }
 
   async findByIdOrThrow(id: number) {

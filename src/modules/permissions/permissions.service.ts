@@ -6,13 +6,14 @@ import {
 import { PermissionsRepository } from './permissions.repository';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
+import { FindPermissionsQueryDto } from './dto/find-permissions-query.dto';
 
 @Injectable()
 export class PermissionsService {
   constructor(private readonly permissionsRepository: PermissionsRepository) {}
 
-  findAll() {
-    return this.permissionsRepository.findAll();
+  findAll(query: FindPermissionsQueryDto) {
+    return this.permissionsRepository.findAll(query);
   }
 
   async findByIdOrThrow(id: number) {
