@@ -1,4 +1,5 @@
 import { ArrayUnique, IsArray, IsInt } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 /**
  * Dipakai untuk endpoint PUT /roles/:id/permissions — menggantikan
@@ -7,6 +8,11 @@ import { ArrayUnique, IsArray, IsInt } from 'class-validator';
  * semua permission dari role ini.
  */
 export class SyncRolePermissionsDto {
+  @ApiProperty({
+    type: [Number],
+    example: [12, 13],
+    description: 'ID permission yang MENGGANTIKAN seluruh daftar lama.',
+  })
   @IsArray()
   @ArrayUnique()
   @IsInt({ each: true })

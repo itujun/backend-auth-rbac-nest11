@@ -30,7 +30,6 @@
     "@nestjs/config": "^12.0.0",
     "@nestjs/core": "^11.0.1",
     "@nestjs/jwt": "^12.0.1",
-    "@nestjs/mapped-types": "^12.0.0",
     "@nestjs/passport": "^12.0.0",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.0.0",
@@ -110,7 +109,7 @@
       ]
     },
     "transformIgnorePatterns": [
-      "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@nestjs/mapped-types|@standard-schema|drizzle-orm)/)"
+      "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@standard-schema|drizzle-orm)/)"
     ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"

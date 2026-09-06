@@ -561,11 +561,16 @@ ini ikut ter-assign).
       Scope tambahan di luar rencana awal, ditambahkan supaya project ini
       layak dijadikan portofolio & siap-deploy. Dikerjakan bertahap per
       sub-item (lihat checklist detail di bawah).
-  - [x] Swagger/OpenAPI docs — **setup inti** (`/api/docs`, bearer auth,
-        response envelope terdokumentasi lewat `ApiStandardResponse`)
-  - [x] Swagger/OpenAPI docs — anotasi modul **Auth** (`@ApiTags`, `@ApiOperation`, `ApiStandardResponse` untuk register/login/refresh/me, DTO respons `UserResponseDto`/`LoginResponseDto`/`RefreshResponseDto`)
-  - [x] Swagger/OpenAPI docs — anotasi modul **Users** & **Profiles** (query pagination/search/filter/sort terdokumentasi, upload avatar via `@ApiConsumes('multipart/form-data')`, DTO respons `ProfileResponseDto`)
-  - [ ] Swagger/OpenAPI docs — anotasi modul Roles/Permissions
+  - [x] Swagger/OpenAPI docs — **SELESAI**. Setup inti (`/api/docs`, bearer
+        auth, `ApiStandardResponse`) + anotasi penuh semua modul (Auth,
+        Users, Profiles, Roles, Permissions): `@ApiTags`, `@ApiOperation`,
+        `@ApiParam`, dokumentasi error (`@ApiConflictResponse`,
+        `@ApiForbiddenResponse`, `@ApiNotFoundResponse`,
+        `@ApiUnauthorizedResponse`) sesuai exception yang benar-benar
+        dilempar tiap service. Bonus: `UpdateRoleDto`/`UpdatePermissionDto`
+        dipindah ke `PartialType` dari `@nestjs/swagger` (bukan
+        `@nestjs/mapped-types`) supaya field opsional ikut terefleksi di
+        dokumentasi OpenAPI, dependency lama dihapus.
   - [ ] Security hardening (Helmet, rate limiting, review cookie flags)
   - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
   - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
