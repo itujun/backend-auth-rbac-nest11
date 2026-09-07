@@ -8,6 +8,20 @@ import {
 } from '@nestjs/common';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
+type JsonBody = Record<string, unknown>;
+
+/**
+ * `jsonMock.mock.calls` bertipe `any[][]` (bawaan `jest.Mock` tanpa
+ * generic). Cast ke tipe konkret DI SINI SAJA (satu tempat, satu kali)
+ * lewat `as unknown as` — variabel `calls` sesudahnya punya tipe statis
+ * asli, jadi akses property selanjutnya AMAN, tidak lagi kena
+ * @typescript-eslint/no-unsafe-member-access di tiap titik pemakaian.
+ */
+function lastJsonBody(mock: jest.Mock): JsonBody {
+  const calls = mock.mock.calls as unknown as JsonBody[][];
+  return calls[calls.length - 1][0];
+}
+
 describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
   let jsonMock: jest.Mock;
@@ -45,7 +59,7 @@ describe('AllExceptionsFilter', () => {
       }),
     );
     // Tidak boleh ada field `errors` kalau bukan kasus validasi
-    expect(jsonMock.mock.calls[0][0].errors).toBeUndefined();
+    expect(lastJsonBody(jsonMock).errors).toBeUndefined();
   });
 
   it('mengubah body ValidationPipe ({message: string[]}) jadi errors array + pesan generik', () => {
@@ -79,7 +93,7 @@ describe('AllExceptionsFilter', () => {
       host,
     );
 
-    const body = jsonMock.mock.calls[0][0] as Record<string, unknown>;
+    const body = lastJsonBody(jsonMock);
     expect(body.statusCode).toBe(HttpStatus.SERVICE_UNAVAILABLE);
     // Detail lengkap harus tetap ada, cuma dipindah ke `errors`
     expect(body.errors).toEqual(healthCheckBody);
@@ -92,7 +106,7 @@ describe('AllExceptionsFilter', () => {
     );
 
     expect(statusMock).toHaveBeenCalledWith(HttpStatus.INTERNAL_SERVER_ERROR);
-    const body = jsonMock.mock.calls[0][0] as Record<string, unknown>;
+    const body = lastJsonBody(jsonMock);
     expect(body.message).toBe('Terjadi kesalahan pada server');
     expect(JSON.stringify(body)).not.toContain('internal-db-prod');
   });
@@ -100,7 +114,7 @@ describe('AllExceptionsFilter', () => {
   it('selalu menyertakan timestamp & path request yang gagal', () => {
     filter.catch(new ConflictException('x'), host);
 
-    const body = jsonMock.mock.calls[0][0] as Record<string, unknown>;
+    const body = lastJsonBody(jsonMock);
     expect(body.path).toBe('/api/test');
     expect(typeof body.timestamp).toBe('string');
   });

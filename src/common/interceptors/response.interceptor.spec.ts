@@ -4,13 +4,17 @@ import { firstValueFrom, of } from 'rxjs';
 import { ResponseInterceptor } from './response.interceptor';
 import { RESPONSE_MESSAGE_KEY } from '../decorators/response-message.decorator';
 
+// Referensi TETAP — lihat komentar serupa di guard spec (jwt-auth.guard,
+// permissions.guard) soal kenapa ini penting.
+const handlerRef = () => undefined;
+
 function createContext(method: string, url: string, statusCode = 200) {
   const context = {
     switchToHttp: () => ({
       getRequest: () => ({ method, url }),
       getResponse: () => ({ statusCode }),
     }),
-    getHandler: () => jest.fn(),
+    getHandler: () => handlerRef,
   } as unknown as ExecutionContext;
   return context;
 }
@@ -19,11 +23,22 @@ function createHandler<T>(result: T): CallHandler<T> {
   return { handle: () => of(result) };
 }
 
+/**
+ * Reflector di-mock lewat fungsi terpusat (bukan `{ get: jest.fn() }`
+ * inline di tiap test) supaya `getMock` bisa dijadikan variabel sendiri —
+ * asersi lewat `expect(reflector.get)` langsung akan kena
+ * `@typescript-eslint/unbound-method` (method reference lepas dari
+ * objeknya), sedangkan asersi ke `getMock` (variabel biasa) aman.
+ */
+function createReflector(customMessage: string | undefined = undefined) {
+  const getMock = jest.fn().mockReturnValue(customMessage);
+  const reflector = { get: getMock } as unknown as Reflector;
+  return { reflector, getMock };
+}
+
 describe('ResponseInterceptor', () => {
   it('membungkus hasil biasa dengan pesan default sesuai HTTP method', async () => {
-    const reflector = {
-      get: jest.fn().mockReturnValue(undefined),
-    } as unknown as Reflector;
+    const { reflector } = createReflector();
     const interceptor = new ResponseInterceptor(reflector);
     const context = createContext('POST', '/api/roles', 201);
 
@@ -41,9 +56,7 @@ describe('ResponseInterceptor', () => {
   });
 
   it('memakai pesan dari @ResponseMessage() kalau ada, bukan default per-method', async () => {
-    const reflector = {
-      get: jest.fn().mockReturnValue('Registrasi berhasil'),
-    } as unknown as Reflector;
+    const { reflector, getMock } = createReflector('Registrasi berhasil');
     const interceptor = new ResponseInterceptor(reflector);
     const context = createContext('POST', '/api/auth/register', 201);
 
@@ -52,16 +65,14 @@ describe('ResponseInterceptor', () => {
     );
 
     expect(result.message).toBe('Registrasi berhasil');
-    expect(reflector.get).toHaveBeenCalledWith(
+    expect(getMock).toHaveBeenCalledWith(
       RESPONSE_MESSAGE_KEY,
       expect.anything(),
     );
   });
 
   it('mendeteksi bentuk paginated ({items, meta}) dan memindahkan meta ke level atas', async () => {
-    const reflector = {
-      get: jest.fn().mockReturnValue(undefined),
-    } as unknown as Reflector;
+    const { reflector } = createReflector();
     const interceptor = new ResponseInterceptor(reflector);
     const context = createContext('GET', '/api/roles', 200);
 
@@ -79,9 +90,7 @@ describe('ResponseInterceptor', () => {
   });
 
   it('TIDAK menganggap objek biasa yang kebetulan punya field lain sebagai paginated', async () => {
-    const reflector = {
-      get: jest.fn().mockReturnValue(undefined),
-    } as unknown as Reflector;
+    const { reflector } = createReflector();
     const interceptor = new ResponseInterceptor(reflector);
     const context = createContext('GET', '/api/health', 200);
 
@@ -97,9 +106,7 @@ describe('ResponseInterceptor', () => {
   });
 
   it('selalu menyertakan timestamp (ISO string) dan path dari request', async () => {
-    const reflector = {
-      get: jest.fn().mockReturnValue(undefined),
-    } as unknown as Reflector;
+    const { reflector } = createReflector();
     const interceptor = new ResponseInterceptor(reflector);
     const context = createContext('GET', '/api/permissions', 200);
 
