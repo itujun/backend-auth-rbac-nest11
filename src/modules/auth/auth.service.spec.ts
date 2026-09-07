@@ -56,8 +56,14 @@ function createAuthService() {
     rawToken: 'fake-refresh-token',
     expiresAt: new Date('2026-02-01'),
   });
+  const rotateMock = jest.fn();
+  const revokeMock = jest.fn();
+  const revokeAllForUserMock = jest.fn();
   const refreshTokensService = {
     issue: issueMock,
+    rotate: rotateMock,
+    revoke: revokeMock,
+    revokeAllForUser: revokeAllForUserMock,
   } as unknown as RefreshTokensService;
 
   const authService = new AuthService(
@@ -77,6 +83,9 @@ function createAuthService() {
     compareMock,
     signAsyncMock,
     issueMock,
+    rotateMock,
+    revokeMock,
+    revokeAllForUserMock,
   };
 }
 
@@ -191,6 +200,94 @@ describe('AuthService', () => {
         refreshToken: 'fake-refresh-token',
       });
       expect(result.user).not.toHaveProperty('passwordHash');
+    });
+  });
+
+  describe('refresh', () => {
+    it('rotasi token lalu terbitkan access token baru untuk user yang masih aktif', async () => {
+      const { authService, rotateMock, findActiveByIdMock, signAsyncMock } =
+        createAuthService();
+      const user = fakeUser();
+      const newRefreshToken = {
+        id: 100,
+        rawToken: 'new-raw-token',
+        expiresAt: new Date('2026-03-01'),
+      };
+      rotateMock.mockResolvedValue({
+        userId: user.id,
+        refreshToken: newRefreshToken,
+      });
+      findActiveByIdMock.mockResolvedValue(user);
+
+      const result = await authService.refresh('old-raw-token', {
+        ipAddress: '127.0.0.1',
+      });
+
+      expect(rotateMock).toHaveBeenCalledWith('old-raw-token', {
+        ipAddress: '127.0.0.1',
+      });
+      expect(findActiveByIdMock).toHaveBeenCalledWith(user.id);
+      expect(signAsyncMock).toHaveBeenCalledWith({
+        sub: user.id,
+        email: user.email,
+      });
+      expect(result).toEqual({
+        accessToken: 'fake-access-token',
+        refreshToken: 'new-raw-token',
+        refreshTokenExpiresAt: newRefreshToken.expiresAt,
+      });
+    });
+
+    it('revoke semua sesi & tolak kalau user sudah dihapus/nonaktif setelah rotasi berhasil', async () => {
+      const {
+        authService,
+        rotateMock,
+        findActiveByIdMock,
+        revokeAllForUserMock,
+      } = createAuthService();
+      rotateMock.mockResolvedValue({
+        userId: 42,
+        refreshToken: { id: 1, rawToken: 'x', expiresAt: new Date() },
+      });
+      findActiveByIdMock.mockResolvedValue(null); // user dihapus/nonaktif
+
+      await expect(authService.refresh('raw-token')).rejects.toThrow(
+        new UnauthorizedException('User tidak ditemukan atau tidak aktif'),
+      );
+      expect(revokeAllForUserMock).toHaveBeenCalledWith(42);
+    });
+
+    it('meneruskan (tidak menelan) exception dari rotate() — mis. token invalid/reuse', async () => {
+      const { authService, rotateMock } = createAuthService();
+      rotateMock.mockRejectedValue(
+        new UnauthorizedException('Sesi tidak valid, silakan login ulang'),
+      );
+
+      await expect(authService.refresh('raw-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+  });
+
+  describe('logout', () => {
+    it('mendelegasikan ke refreshTokensService.revoke() dengan raw token yang diberikan', async () => {
+      const { authService, revokeMock } = createAuthService();
+      revokeMock.mockResolvedValue(undefined);
+
+      await authService.logout('raw-token-dari-cookie');
+
+      expect(revokeMock).toHaveBeenCalledWith('raw-token-dari-cookie');
+    });
+  });
+
+  describe('logoutAll', () => {
+    it('mendelegasikan ke refreshTokensService.revokeAllForUser() dengan userId yang diberikan', async () => {
+      const { authService, revokeAllForUserMock } = createAuthService();
+      revokeAllForUserMock.mockResolvedValue(undefined);
+
+      await authService.logoutAll(7);
+
+      expect(revokeAllForUserMock).toHaveBeenCalledWith(7);
     });
   });
 });
