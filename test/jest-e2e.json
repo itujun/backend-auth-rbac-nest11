@@ -16,6 +16,6 @@
     ]
   },
   "transformIgnorePatterns": [
-    "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@nestjs/mapped-types|@standard-schema|drizzle-orm)/)"
+    "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@standard-schema|drizzle-orm)/)"
   ]
 }
