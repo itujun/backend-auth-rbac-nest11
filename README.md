@@ -10,6 +10,8 @@ repository pattern, dan standard API response.
 - **ORM**: Drizzle ORM (PostgreSQL)
 - **Auth**: JWT (access token) + refresh token via httpOnly cookie, rotasi & revoke
 - **API Docs**: Swagger/OpenAPI (`@nestjs/swagger`) di `/api/docs`
+- **Logging**: `nestjs-pino` (JSON terstruktur di production, pretty-print di development)
+- **Health Check**: `@nestjs/terminus` di `/api/health` (custom indicator untuk Drizzle)
 - **Frontend**: Svelte (simulasi UI untuk testing fitur backend)
 
 ## Cara Menjalankan (Development)
@@ -121,6 +123,69 @@ di-ping sangat sering oleh uptime monitor/load balancer.
 browser), `secure` (wajib HTTPS) otomatis aktif kalau `NODE_ENV=production`,
 `sameSite: 'lax'`, dan `path` dibatasi ke `/api/auth` saja.
 
+## Logging
+
+Semua log aplikasi (termasuk log otomatis tiap request/response) pakai
+[`nestjs-pino`](https://github.com/iamolegga/nestjs-pino) — JSON
+terstruktur, bukan `console.log` biasa.
+
+- **Development**: pretty-print berwarna (`pino-pretty`), gampang dibaca
+  di terminal.
+- **Production**: JSON mentah ke stdout — jauh lebih murah diproses log
+  aggregator (Loki/ELK/Datadog dst) dibanding parsing teks berwarna.
+- Kontrol lewat env `LOG_LEVEL` (`trace`/`debug`/`info`/`warn`/`error`/
+  `fatal`) dan `LOG_PRETTY` — keduanya opsional, default mengikuti
+  `NODE_ENV` (lihat `configuration.ts`).
+- **Redaksi otomatis**: header `Authorization`, `Cookie`, dan
+  `Set-Cookie` SELALU disensor di log (`**REDACTED**`) — tidak pernah
+  tercatat utuh, karena isinya JWT access token & refresh token.
+- Level log tiap request otomatis mengikuti status HTTP: 5xx → `error`,
+  4xx → `warn`, selebihnya → `info` — supaya gampang di-filter, tidak
+  semua request "tenggelam" di level `info` yang sama.
+- `GET /health` dikecualikan dari log otomatis (terlalu sering dipanggil
+  uptime monitor, cuma jadi noise).
+
+Migrasi ke pino ini **tidak mengubah kode di file lain manapun** —
+`new Logger(NamaClass)` dari `@nestjs/common` yang sudah dipakai di
+`AvatarStorageService`, `RefreshTokensService`, dst tetap berfungsi
+persis sama, cuma outputnya sekarang lewat pino
+(`app.useLogger(app.get(Logger))` di `main.ts` yang menangani switch ini
+secara transparan).
+
+## Health Check
+
+`GET /health` (`GET /api/health` dengan prefix) sekarang berbasis
+[`@nestjs/terminus`](https://github.com/nestjs/terminus), bukan sekadar
+"aplikasi hidup, kembalikan 200":
+
+- Cek koneksi Postgres via custom `DrizzleHealthIndicator`
+  (`src/modules/health/indicators/database.health.ts`) — Terminus punya
+  indicator bawaan untuk TypeORM/Mongoose/Prisma/dll, tapi TIDAK untuk
+  Drizzle, jadi ditulis sendiri mengikuti API resmi
+  `HealthIndicatorService` (bukan `HealthIndicator` lama yang sudah
+  deprecated).
+- Response sukses (200): `{ status: 'ok', info: { database: { status: 'up' } }, ... }`
+- Response gagal (503, otomatis dari Terminus): detail indicator mana
+  yang down beserta pesan error-nya — **tidak hilang** walau tetap
+  dibungkus `ApiSuccessResponse`/`ApiErrorResponse` envelope standar
+  aplikasi ini (lihat perbaikan di `AllExceptionsFilter` di bawah).
+- `@Public()`, `@SkipThrottle()`, `@ApiExcludeController()` tetap
+  dipertahankan seperti sebelumnya.
+
+**Bug dorman yang ditemukan & dibenahi saat mengerjakan ini:**
+1. `DatabaseModule.onModuleDestroy()` sudah ada sejak awal tapi **tidak
+   pernah benar-benar terpanggil** — NestJS tidak menjalankan lifecycle
+   shutdown hook saat menerima SIGTERM/SIGINT kecuali
+   `app.enableShutdownHooks()` diaktifkan eksplisit, dan itu baru
+   dilakukan sekarang. Pool Postgres direstrukturisasi (token `PG_POOL`
+   terpisah, tidak di-export ke modul lain) supaya bisa benar-benar
+   ditutup graceful saat shutdown.
+2. `AllExceptionsFilter` diam-diam membuang detail error kalau body
+   exception bukan bentuk `{ message: string }` standar NestJS — persis
+   kasus `HealthCheckResult` dari Terminus saat gagal (`{status, info,
+   error, details}`, tanpa field `message` sama sekali). Sekarang body
+   apa adanya di-fallback ke `errors` supaya detail tidak hilang.
+
 ## Script Database (Drizzle Kit)
 
 | Script              | Fungsi                                                        |
@@ -140,14 +205,14 @@ src/
     interceptors/  # ResponseInterceptor (format response konsisten)
     interfaces/     # Kontrak tipe bersama (ApiResponse, PaginatedResult)
     swagger/        # Model & decorator dokumentasi (ApiStandardResponse)
-  config/          # Konfigurasi terpusat + validasi env (fail-fast) + setup Swagger
+  config/          # Konfigurasi terpusat + validasi env (fail-fast) + setup Swagger/logger
   core/
     repositories/  # BaseRepository — DI wiring dasar untuk semua repository
   database/
     schema/        # Definisi tabel Drizzle (source of truth struktur DB)
     migrations/    # File migration SQL yang di-generate dari schema
-    database.module.ts  # Provider koneksi Postgres + instance Drizzle (global)
-  modules/         # Feature module (auth, profile, role, permission — menyusul)
+    database.module.ts  # Provider koneksi Postgres (PG_POOL) + instance Drizzle (global)
+  modules/         # Feature module: auth, users, profiles, roles, permissions, health
 ```
 
 ### Kenapa strukturnya begini?
@@ -608,7 +673,8 @@ ini ikut ter-assign).
         `@nestjs/mapped-types`) supaya field opsional ikut terefleksi di
         dokumentasi OpenAPI, dependency lama dihapus.
   - [x] Security hardening — Helmet (header keamanan, CSP dimatikan khusus saat Swagger aktif, CORP `cross-origin` untuk avatar), rate limiting global via `@nestjs/throttler` + limit lebih ketat khusus di `/auth/register`, `/auth/login`, `/auth/refresh`. Cookie flags (httpOnly/secure/sameSite) sudah benar sejak awal (lihat `RefreshCookieHelper`).
-  - [ ] Structured logging (`nestjs-pino`) + health check proper (`@nestjs/terminus`, cek koneksi DB)
+  - [x] Structured logging (`nestjs-pino`) — JSON di production, pretty-print berwarna di development (`LOG_LEVEL`/`LOG_PRETTY`), redact otomatis header `Authorization`/`Cookie`/`Set-Cookie`, level log mengikuti status HTTP (4xx→warn, 5xx→error), health check dikecualikan dari auto-log biar tidak jadi noise.
+  - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
   - [ ] Audit log module (login attempt, CRUD role/permission/profile)
   - [ ] CI pipeline (GitHub Actions: lint → test → build)

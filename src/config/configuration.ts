@@ -39,6 +39,18 @@ export default () => ({
     ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '100', 10),
   },
+  logger: {
+    level:
+      process.env.LOG_LEVEL ??
+      (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
+    // pino-pretty (format berwarna, human-readable) di development;
+    // JSON mentah di production — JSON jauh lebih murah diproses log
+    // aggregator (Loki/ELK/Datadog dst) dibanding parsing teks berwarna.
+    pretty:
+      process.env.LOG_PRETTY !== undefined
+        ? process.env.LOG_PRETTY === 'true'
+        : process.env.NODE_ENV !== 'production',
+  },
 });
 
 export type AppConfig = ReturnType<typeof import('./configuration').default>;

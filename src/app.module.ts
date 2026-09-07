@@ -2,10 +2,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { AppController } from './app.controller';
+import { LoggerModule } from 'nestjs-pino';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { createLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './database/database.module';
+import { HealthModule } from './modules/health/health.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthorizationModule } from './core/authorization/authorization.module';
@@ -19,6 +21,16 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
       isGlobal: true, // ConfigService bisa di-inject di module manapun tanpa import ulang
       load: [configuration],
       validate: validateEnv, // fail-fast kalau ada env wajib yang kosong/salah format
+    }),
+    // LoggerModule HARUS diimpor cuma SEKALI di root module (peringatan
+    // resmi nestjs-pino) — dia @Global(), jadi Logger/PinoLogger otomatis
+    // tersedia di modul manapun tanpa import ulang. Import ulang di modul
+    // lain akan memasang middleware pino-http DUA KALI (tiap request
+    // ter-log dobel) tanpa error apapun yang kelihatan.
+    LoggerModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: createLoggerOptions,
     }),
     // Didaftarkan SEBELUM module lain (lihat providers[] di bawah juga) —
     // rate limiting harus jadi lapisan PALING LUAR, jalan sebelum
@@ -40,6 +52,7 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
       }),
     }),
     DatabaseModule,
+    HealthModule,
     // URUTAN IMPORT INI PENTING: NestJS menjalankan beberapa provider
     // APP_GUARD sesuai urutan modul di-resolve. AuthModule (JwtAuthGuard,
     // yang mengisi `request.user`) HARUS di-import SEBELUM
@@ -54,7 +67,6 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
     RolesModule,
     ProfilesModule,
   ],
-  controllers: [AppController],
   providers: [
     // Guard global PERTAMA yang jalan (lihat komentar ThrottlerModule di
     // atas) — didaftarkan di root AppModule, bukan di dalam modul lain,

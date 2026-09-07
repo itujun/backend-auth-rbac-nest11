@@ -37,6 +37,13 @@ export const envValidationSchema = Joi.object({
   // Rate limiting global (endpoint sensitif punya limit sendiri, lihat auth.controller.ts)
   THROTTLE_TTL_MS: Joi.number().integer().positive().default(60000),
   THROTTLE_LIMIT: Joi.number().integer().positive().default(100),
+
+  // Logging (nestjs-pino). Keduanya opsional — default mengikuti
+  // NODE_ENV (lihat configuration.ts).
+  LOG_LEVEL: Joi.string()
+    .valid('trace', 'debug', 'info', 'warn', 'error', 'fatal')
+    .optional(),
+  LOG_PRETTY: Joi.boolean().optional(),
 }).unknown(true); // izinkan env lain (mis. dari OS/CI) yang tidak kita definisikan
 
 /**

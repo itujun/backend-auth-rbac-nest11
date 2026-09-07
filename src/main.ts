@@ -5,15 +5,36 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { join } from 'node:path';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { Logger as PinoAppLogger, LoggerErrorInterceptor } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { setupSwagger } from './config/swagger.config';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // `bufferLogs: true` menahan sementara log internal NestJS (mis. pesan
+  // "Nest application successfully started") sampai logger custom di
+  // bawah terpasang — supaya log bootstrap awal juga ikut format pino,
+  // bukan format default NestJS lalu tiba-tiba "berubah" di tengah jalan.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
+  // Ganti logger bawaan NestJS dengan pino. SETELAH baris ini, SEMUA
+  // `new Logger(context)` dari '@nestjs/common' di seluruh codebase
+  // (AvatarStorageService, RefreshTokensService, dst) otomatis jalan
+  // lewat pino tanpa perlu diubah satu-satu — ini yang membuat migrasi
+  // logger ini nyaris tanpa-perubahan di file lain.
+  app.useLogger(app.get(PinoAppLogger));
+
   const configService = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
+
+  // Nest TIDAK menjalankan lifecycle shutdown hook (mis. onModuleDestroy
+  // di DatabaseModule) saat menerima sinyal OS (SIGTERM/SIGINT) kecuali
+  // ini diaktifkan — penting untuk graceful shutdown di container
+  // (deploy baru, pod eviction k8s, dst) supaya koneksi Postgres ditutup
+  // rapi, bukan diputus paksa di tengah query yang sedang berjalan.
+  app.enableShutdownHooks();
 
   // Helmet HARUS dipasang paling awal (sebelum middleware lain) — dia cuma
   // menambah response header keamanan, tidak butuh apapun dari request.
@@ -76,7 +97,16 @@ async function bootstrap() {
   );
 
   app.useGlobalFilters(new AllExceptionsFilter());
-  app.useGlobalInterceptors(new ResponseInterceptor(app.get(Reflector)));
+  app.useGlobalInterceptors(
+    // Tanpa ini, log otomatis pino-http untuk request yang error cuma
+    // berisi status code (mis. 500) tanpa stack trace/detail exception
+    // aslinya — karena pino-http sendiri tidak tahu-menahu soal
+    // AllExceptionsFilter kita. LoggerErrorInterceptor menjembatani ini:
+    // menempelkan exception yang tertangkap ke response, supaya pino-http
+    // ikut mencatatnya lengkap di log "request errored".
+    new LoggerErrorInterceptor(),
+    new ResponseInterceptor(app.get(Reflector)),
+  );
 
   app.setGlobalPrefix('api');
 

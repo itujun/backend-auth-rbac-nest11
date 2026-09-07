@@ -39,8 +39,17 @@ export class AllExceptionsFilter implements ExceptionFilter {
         if (Array.isArray(bodyObj.message)) {
           message = 'Validasi gagal';
           errors = bodyObj.message;
+        } else if (typeof bodyObj.message === 'string') {
+          message = bodyObj.message;
         } else {
-          message = (bodyObj.message as string) ?? exception.message;
+          // Body TIDAK mengikuti bentuk { message: string } standar
+          // NestJS — misalnya `HealthCheckResult` dari @nestjs/terminus
+          // saat health check gagal: { status, info, error, details },
+          // TANPA field `message` sama sekali. Kalau ini tidak ditangani,
+          // detail penting (indikator mana yang down & kenapa) akan
+          // hilang begitu saja, client cuma dapat pesan generik.
+          message = exception.message;
+          errors = bodyObj;
         }
       }
     } else if (exception instanceof Error) {
