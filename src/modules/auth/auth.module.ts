@@ -13,11 +13,13 @@ import { HashingModule } from '../../core/hashing/hashing.module';
 import { RefreshTokensRepository } from './refresh-tokens/refresh-tokens.repository';
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
 import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
     UsersModule,
     HashingModule,
+    AuditLogModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

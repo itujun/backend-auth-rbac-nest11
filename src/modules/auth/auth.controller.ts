@@ -84,8 +84,8 @@ export class AuthController {
     description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
   })
   @ResponseMessage('Registrasi berhasil')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() dto: RegisterDto, @Req() req: Request) {
+    return this.authService.register(dto, this.requestMeta(req));
   }
 
   @Public()
@@ -189,7 +189,7 @@ export class AuthController {
     // Logout bersifat idempotent: kalau cookie tidak ada/sudah invalid,
     // tetap dianggap sukses (client memang jadi "logged out").
     if (rawRefreshToken) {
-      await this.authService.logout(rawRefreshToken);
+      await this.authService.logout(rawRefreshToken, this.requestMeta(req));
     }
 
     this.refreshCookieHelper.clear(res);
@@ -205,9 +205,10 @@ export class AuthController {
   @ResponseMessage('Semua sesi berhasil di-logout')
   async logoutAll(
     @CurrentUser() user: SafeUser,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    await this.authService.logoutAll(user.id);
+    await this.authService.logoutAll(user.id, this.requestMeta(req));
     this.refreshCookieHelper.clear(res);
     return null;
   }

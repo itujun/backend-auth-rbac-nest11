@@ -14,6 +14,7 @@ import {
   RefreshTokensService,
   RequestMeta,
 } from './refresh-tokens/refresh-tokens.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class AuthService {
@@ -22,9 +23,10 @@ export class AuthService {
     private readonly hashingService: HashingService,
     private readonly jwtService: JwtService,
     private readonly refreshTokensService: RefreshTokensService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, meta: RequestMeta = {}) {
     const existingUser = await this.usersService.findByEmail(dto.email);
     if (existingUser) {
       throw new ConflictException('Email sudah terdaftar');
@@ -36,6 +38,19 @@ export class AuthService {
       email: dto.email,
       passwordHash,
       fullName: dto.fullName,
+    });
+
+    // `record()` dijamin tidak pernah reject (lihat AuditLogService) —
+    // aman di-`await` tanpa risiko registrasi yang SUDAH berhasil malah
+    // dilaporkan gagal ke client gara-gara audit log gagal ditulis.
+    await this.auditLogService.record({
+      action: 'auth.register',
+      actorUserId: user.id,
+      actorEmail: user.email,
+      resourceType: 'user',
+      resourceId: user.id,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
     });
 
     return this.usersService.sanitize(user);
@@ -52,10 +67,29 @@ export class AuthService {
     );
 
     if (!user) {
+      // actorUserId null (user tidak ditemukan) TAPI actorEmail tetap
+      // dicatat (email yang DICOBA, bukan email user asli) — berguna
+      // untuk mendeteksi pola credential-stuffing/brute-force walau
+      // emailnya sendiri tidak pernah terdaftar.
+      await this.auditLogService.record({
+        action: 'auth.login_failed',
+        actorEmail: dto.email,
+        metadata: { reason: 'user_not_found' },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
       throw invalidCredentialsError;
     }
 
     if (!user.isActive || user.deletedAt) {
+      await this.auditLogService.record({
+        action: 'auth.login_failed',
+        actorUserId: user.id,
+        actorEmail: user.email,
+        metadata: { reason: 'account_inactive' },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
       throw new UnauthorizedException('Akun tidak aktif');
     }
 
@@ -65,11 +99,27 @@ export class AuthService {
     );
 
     if (!isPasswordValid) {
+      await this.auditLogService.record({
+        action: 'auth.login_failed',
+        actorUserId: user.id,
+        actorEmail: user.email,
+        metadata: { reason: 'invalid_password' },
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
       throw invalidCredentialsError;
     }
 
     const accessToken = await this.generateAccessToken(user);
     const refreshToken = await this.refreshTokensService.issue(user.id, meta);
+
+    await this.auditLogService.record({
+      action: 'auth.login_success',
+      actorUserId: user.id,
+      actorEmail: user.email,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
 
     return {
       accessToken,
@@ -103,12 +153,29 @@ export class AuthService {
     };
   }
 
-  logout(rawRefreshToken: string): Promise<void> {
-    return this.refreshTokensService.revoke(rawRefreshToken);
+  async logout(rawRefreshToken: string, meta: RequestMeta = {}): Promise<void> {
+    const revoked = await this.refreshTokensService.revoke(rawRefreshToken);
+
+    // revoked bisa null (token sudah basi/tidak dikenal) — logout tetap
+    // idempotent, tapi tidak ada userId yang bisa dicatat sebagai actor.
+    if (revoked) {
+      await this.auditLogService.record({
+        action: 'auth.logout',
+        actorUserId: revoked.userId,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
   }
 
-  logoutAll(userId: number): Promise<void> {
-    return this.refreshTokensService.revokeAllForUser(userId);
+  async logoutAll(userId: number, meta: RequestMeta = {}): Promise<void> {
+    await this.refreshTokensService.revokeAllForUser(userId);
+    await this.auditLogService.record({
+      action: 'auth.logout_all',
+      actorUserId: userId,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
   }
 
   private generateAccessToken(user: User): Promise<string> {

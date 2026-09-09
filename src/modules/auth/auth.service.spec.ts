@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { HashingService } from '../../core/hashing/hashing.service';
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { User } from '../../database/schema';
 
 function fakeUser(overrides: Partial<User> = {}): User {
@@ -66,11 +67,15 @@ function createAuthService() {
     revokeAllForUser: revokeAllForUserMock,
   } as unknown as RefreshTokensService;
 
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  const auditLogService = { record: recordMock } as unknown as AuditLogService;
+
   const authService = new AuthService(
     usersService,
     hashingService,
     jwtService,
     refreshTokensService,
+    auditLogService,
   );
 
   return {
@@ -83,6 +88,7 @@ function createAuthService() {
     compareMock,
     signAsyncMock,
     issueMock,
+    recordMock,
     rotateMock,
     revokeMock,
     revokeAllForUserMock,
@@ -106,8 +112,13 @@ describe('AuthService', () => {
     });
 
     it('hash password lalu buat user+profile, dan hasilnya TIDAK mengandung passwordHash', async () => {
-      const { authService, findByEmailMock, hashMock, createWithProfileMock } =
-        createAuthService();
+      const {
+        authService,
+        findByEmailMock,
+        hashMock,
+        createWithProfileMock,
+        recordMock,
+      } = createAuthService();
       findByEmailMock.mockResolvedValue(null);
       createWithProfileMock.mockResolvedValue(fakeUser());
 
@@ -125,36 +136,60 @@ describe('AuthService', () => {
       });
       expect(result).not.toHaveProperty('passwordHash');
       expect(result.email).toBe('budi@example.com');
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'auth.register', actorUserId: 1 }),
+      );
     });
   });
 
   describe('login', () => {
     it('menolak dengan pesan generik kalau email tidak terdaftar (anti-enumeration)', async () => {
-      const { authService, findByEmailMock } = createAuthService();
+      const { authService, findByEmailMock, recordMock } = createAuthService();
       findByEmailMock.mockResolvedValue(null);
 
       await expect(
         authService.login({ email: 'tidak-ada@example.com', password: 'x' }),
       ).rejects.toThrow(new UnauthorizedException('Email atau password salah'));
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'auth.login_failed',
+          actorUserId: undefined,
+          actorEmail: 'tidak-ada@example.com',
+          metadata: { reason: 'user_not_found' },
+        }),
+      );
     });
 
     it('menolak dengan pesan generik YANG SAMA kalau password salah (anti-enumeration)', async () => {
-      const { authService, findByEmailMock, compareMock } = createAuthService();
+      const { authService, findByEmailMock, compareMock, recordMock } =
+        createAuthService();
       findByEmailMock.mockResolvedValue(fakeUser());
       compareMock.mockResolvedValue(false);
 
       await expect(
         authService.login({ email: 'budi@example.com', password: 'salah' }),
       ).rejects.toThrow(new UnauthorizedException('Email atau password salah'));
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'auth.login_failed',
+          metadata: { reason: 'invalid_password' },
+        }),
+      );
     });
 
     it('menolak login untuk akun nonaktif (isActive: false)', async () => {
-      const { authService, findByEmailMock } = createAuthService();
+      const { authService, findByEmailMock, recordMock } = createAuthService();
       findByEmailMock.mockResolvedValue(fakeUser({ isActive: false }));
 
       await expect(
         authService.login({ email: 'budi@example.com', password: 'x' }),
       ).rejects.toThrow(new UnauthorizedException('Akun tidak aktif'));
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'auth.login_failed',
+          metadata: { reason: 'account_inactive' },
+        }),
+      );
     });
 
     it('menolak login untuk akun yang sudah soft-deleted', async () => {
@@ -173,6 +208,7 @@ describe('AuthService', () => {
         compareMock,
         signAsyncMock,
         issueMock,
+        recordMock,
       } = createAuthService();
       const user = fakeUser();
       findByEmailMock.mockResolvedValue(user);
@@ -200,6 +236,12 @@ describe('AuthService', () => {
         refreshToken: 'fake-refresh-token',
       });
       expect(result.user).not.toHaveProperty('passwordHash');
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'auth.login_success',
+          actorUserId: user.id,
+        }),
+      );
     });
   });
 
@@ -270,24 +312,40 @@ describe('AuthService', () => {
   });
 
   describe('logout', () => {
-    it('mendelegasikan ke refreshTokensService.revoke() dengan raw token yang diberikan', async () => {
-      const { authService, revokeMock } = createAuthService();
-      revokeMock.mockResolvedValue(undefined);
+    it('mendelegasikan ke refreshTokensService.revoke() & catat audit log dgn actor yang benar', async () => {
+      const { authService, revokeMock, recordMock } = createAuthService();
+      revokeMock.mockResolvedValue({ userId: 1 });
 
       await authService.logout('raw-token-dari-cookie');
 
       expect(revokeMock).toHaveBeenCalledWith('raw-token-dari-cookie');
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'auth.logout', actorUserId: 1 }),
+      );
+    });
+
+    it('TIDAK mencatat audit log kalau token sudah tidak valid (revoke() kembalikan null)', async () => {
+      const { authService, revokeMock, recordMock } = createAuthService();
+      revokeMock.mockResolvedValue(null);
+
+      // Tidak boleh throw walau tidak ada userId untuk audit log
+      await expect(authService.logout('token-basi')).resolves.toBeUndefined();
+      expect(recordMock).not.toHaveBeenCalled();
     });
   });
 
   describe('logoutAll', () => {
-    it('mendelegasikan ke refreshTokensService.revokeAllForUser() dengan userId yang diberikan', async () => {
-      const { authService, revokeAllForUserMock } = createAuthService();
+    it('mendelegasikan ke revokeAllForUser() & catat audit log dgn actor yang benar', async () => {
+      const { authService, revokeAllForUserMock, recordMock } =
+        createAuthService();
       revokeAllForUserMock.mockResolvedValue(undefined);
 
       await authService.logoutAll(7);
 
       expect(revokeAllForUserMock).toHaveBeenCalledWith(7);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'auth.logout_all', actorUserId: 7 }),
+      );
     });
   });
 });

@@ -121,23 +121,26 @@ describe('RefreshTokensService', () => {
   });
 
   describe('revoke (logout satu sesi)', () => {
-    it('bersifat idempotent — tidak error/tidak query revoke kalau token sudah tidak ada', async () => {
+    it('idempotent — kembalikan null (bukan error) kalau token sudah tidak ada', async () => {
       const { service, findByTokenHashMock, revokeMock } = createService();
       findByTokenHashMock.mockResolvedValue(undefined);
 
-      await expect(
-        service.revoke('token-tidak-dikenal'),
-      ).resolves.toBeUndefined();
+      await expect(service.revoke('token-tidak-dikenal')).resolves.toBeNull();
       expect(revokeMock).not.toHaveBeenCalled();
     });
 
-    it('revoke row yang sesuai kalau token ditemukan & belum di-revoke', async () => {
+    it('revoke row yang sesuai & kembalikan userId pemiliknya', async () => {
       const { service, findByTokenHashMock, revokeMock } = createService();
-      findByTokenHashMock.mockResolvedValue({ id: 9, isRevoked: false });
+      findByTokenHashMock.mockResolvedValue({
+        id: 9,
+        userId: 42,
+        isRevoked: false,
+      });
 
-      await service.revoke('token-aktif');
+      const result = await service.revoke('token-aktif');
 
       expect(revokeMock).toHaveBeenCalledWith(9);
+      expect(result).toEqual({ userId: 42 });
     });
   });
 

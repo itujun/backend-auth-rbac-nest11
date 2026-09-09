@@ -96,15 +96,24 @@ export class RefreshTokensService {
     return { userId: existing.userId, refreshToken: newToken };
   }
 
-  /** Logout satu sesi (device saat ini saja). Idempotent — tidak error kalau token sudah tidak valid. */
-  async revoke(rawToken: string): Promise<void> {
+  /**
+   * Logout satu sesi (device saat ini saja). Idempotent — tidak error
+   * kalau token sudah tidak valid. Mengembalikan `userId` pemilik sesi
+   * yang di-revoke (atau `null` kalau token tidak ditemukan/sudah
+   * di-revoke) — dipakai AuthService untuk mencatat audit log,
+   * BUKAN untuk keperluan logic revoke itu sendiri.
+   */
+  async revoke(rawToken: string): Promise<{ userId: number } | null> {
     const tokenHash = hashToken(rawToken);
     const existing =
       await this.refreshTokensRepository.findByTokenHash(tokenHash);
 
-    if (existing && !existing.isRevoked) {
-      await this.refreshTokensRepository.revoke(existing.id);
+    if (!existing || existing.isRevoked) {
+      return null;
     }
+
+    await this.refreshTokensRepository.revoke(existing.id);
+    return { userId: existing.userId };
   }
 
   /** Logout semua sesi/device milik user (dipanggil dari endpoint yang butuh access token valid). */
