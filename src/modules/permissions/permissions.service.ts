@@ -7,10 +7,14 @@ import { PermissionsRepository } from './permissions.repository';
 import { CreatePermissionDto } from './dto/create-permission.dto';
 import { UpdatePermissionDto } from './dto/update-permission.dto';
 import { FindPermissionsQueryDto } from './dto/find-permissions-query.dto';
+import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class PermissionsService {
-  constructor(private readonly permissionsRepository: PermissionsRepository) {}
+  constructor(
+    private readonly permissionsRepository: PermissionsRepository,
+    private readonly auditLogService: AuditLogService,
+  ) {}
 
   findAll(query: FindPermissionsQueryDto) {
     return this.permissionsRepository.findAll(query);
@@ -28,15 +32,26 @@ export class PermissionsService {
     return this.permissionsRepository.findByName(name);
   }
 
-  async create(dto: CreatePermissionDto) {
+  async create(dto: CreatePermissionDto, actor: AuditActor) {
     const existing = await this.permissionsRepository.findByName(dto.name);
     if (existing) {
       throw new ConflictException(`Permission "${dto.name}" sudah ada`);
     }
-    return this.permissionsRepository.create(dto);
+    const permission = await this.permissionsRepository.create(dto);
+
+    await this.auditLogService.record({
+      action: 'permission.create',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'permission',
+      resourceId: permission.id,
+      metadata: { name: permission.name },
+    });
+
+    return permission;
   }
 
-  async update(id: number, dto: UpdatePermissionDto) {
+  async update(id: number, dto: UpdatePermissionDto, actor: AuditActor) {
     await this.findByIdOrThrow(id);
 
     if (dto.name) {
@@ -46,11 +61,31 @@ export class PermissionsService {
       }
     }
 
-    return this.permissionsRepository.update(id, dto);
+    const permission = await this.permissionsRepository.update(id, dto);
+
+    await this.auditLogService.record({
+      action: 'permission.update',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'permission',
+      resourceId: id,
+      metadata: { changes: dto },
+    });
+
+    return permission;
   }
 
-  async delete(id: number): Promise<void> {
-    await this.findByIdOrThrow(id);
+  async delete(id: number, actor: AuditActor): Promise<void> {
+    const permission = await this.findByIdOrThrow(id);
     await this.permissionsRepository.delete(id);
+
+    await this.auditLogService.record({
+      action: 'permission.delete',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'permission',
+      resourceId: id,
+      metadata: { name: permission.name },
+    });
   }
 }

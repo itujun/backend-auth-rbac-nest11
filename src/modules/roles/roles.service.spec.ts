@@ -5,6 +5,9 @@ import { RolePermissionsRepository } from './role-permissions.repository';
 import { UserRolesRepository } from './user-roles.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { UsersService } from '../users/users.service';
+import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
+
+const ACTOR: AuditActor = { userId: 99, email: 'admin@example.com' };
 
 function fakeRole(overrides: Record<string, unknown> = {}) {
   return {
@@ -38,6 +41,8 @@ function createService() {
   };
   const permissionsService = { findByIdOrThrow: jest.fn() };
   const usersService = { findById: jest.fn() };
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  const auditLogService = { record: recordMock };
 
   const service = new RolesService(
     rolesRepo as unknown as RolesRepository,
@@ -45,6 +50,7 @@ function createService() {
     userRolesRepo as unknown as UserRolesRepository,
     permissionsService as unknown as PermissionsService,
     usersService as unknown as UsersService,
+    auditLogService as unknown as AuditLogService,
   );
 
   return {
@@ -54,6 +60,7 @@ function createService() {
     userRolesRepo,
     permissionsService,
     usersService,
+    recordMock,
   };
 }
 
@@ -92,21 +99,24 @@ describe('RolesService', () => {
       const { service, rolesRepo } = createService();
       rolesRepo.findByName.mockResolvedValue(fakeRole());
 
-      await expect(service.create({ name: 'editor' })).rejects.toThrow(
+      await expect(service.create({ name: 'editor' }, ACTOR)).rejects.toThrow(
         ConflictException,
       );
       expect(rolesRepo.create).not.toHaveBeenCalled();
     });
 
     it('membuat role baru kalau nama belum dipakai', async () => {
-      const { service, rolesRepo } = createService();
+      const { service, rolesRepo, recordMock } = createService();
       rolesRepo.findByName.mockResolvedValue(undefined);
       rolesRepo.create.mockResolvedValue(fakeRole());
 
-      const result = await service.create({ name: 'editor' });
+      const result = await service.create({ name: 'editor' }, ACTOR);
 
       expect(rolesRepo.create).toHaveBeenCalledWith({ name: 'editor' });
       expect(result).toEqual(fakeRole());
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'role.create', actorUserId: 99 }),
+      );
     });
   });
 
@@ -115,7 +125,7 @@ describe('RolesService', () => {
       const { service, rolesRepo } = createService();
       rolesRepo.findById.mockResolvedValue(undefined);
 
-      await expect(service.update(1, { name: 'baru' })).rejects.toThrow(
+      await expect(service.update(1, { name: 'baru' }, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -127,7 +137,7 @@ describe('RolesService', () => {
         fakeRole({ id: 2, name: 'admin' }),
       );
 
-      await expect(service.update(1, { name: 'admin' })).rejects.toThrow(
+      await expect(service.update(1, { name: 'admin' }, ACTOR)).rejects.toThrow(
         ConflictException,
       );
     });
@@ -142,7 +152,7 @@ describe('RolesService', () => {
         fakeRole({ id: 1, description: 'baru' }),
       );
 
-      await service.update(1, { name: 'editor', description: 'baru' });
+      await service.update(1, { name: 'editor', description: 'baru' }, ACTOR);
 
       expect(rolesRepo.update).toHaveBeenCalledWith(1, {
         name: 'editor',
@@ -157,7 +167,7 @@ describe('RolesService', () => {
         fakeRole({ description: 'baru saja' }),
       );
 
-      await service.update(1, { description: 'baru saja' });
+      await service.update(1, { description: 'baru saja' }, ACTOR);
 
       expect(rolesRepo.findByName).not.toHaveBeenCalled();
     });
@@ -168,17 +178,20 @@ describe('RolesService', () => {
       const { service, rolesRepo } = createService();
       rolesRepo.findById.mockResolvedValue(undefined);
 
-      await expect(service.delete(1)).rejects.toThrow(NotFoundException);
+      await expect(service.delete(1, ACTOR)).rejects.toThrow(NotFoundException);
       expect(rolesRepo.delete).not.toHaveBeenCalled();
     });
 
     it('menghapus role kalau ditemukan', async () => {
-      const { service, rolesRepo } = createService();
+      const { service, rolesRepo, recordMock } = createService();
       rolesRepo.findById.mockResolvedValue(fakeRole());
 
-      await service.delete(1);
+      await service.delete(1, ACTOR);
 
       expect(rolesRepo.delete).toHaveBeenCalledWith(1);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'role.delete', actorUserId: 99 }),
+      );
     });
   });
 
@@ -209,7 +222,7 @@ describe('RolesService', () => {
       );
 
       await expect(
-        service.syncPermissions(1, { permissionIds: [1, 99] }),
+        service.syncPermissions(1, { permissionIds: [1, 99] }, ACTOR),
       ).rejects.toThrow(NotFoundException);
       expect(rolePermissionsRepo.syncPermissions).not.toHaveBeenCalled();
     });
@@ -224,9 +237,11 @@ describe('RolesService', () => {
         'p2',
       ]);
 
-      const result = await service.syncPermissions(1, {
-        permissionIds: [1, 2],
-      });
+      const result = await service.syncPermissions(
+        1,
+        { permissionIds: [1, 2] },
+        ACTOR,
+      );
 
       expect(permissionsService.findByIdOrThrow).toHaveBeenCalledWith(1);
       expect(permissionsService.findByIdOrThrow).toHaveBeenCalledWith(2);
@@ -257,7 +272,7 @@ describe('RolesService', () => {
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       usersService.findById.mockResolvedValue(undefined);
 
-      await expect(service.assignToUser(1, 7)).rejects.toThrow(
+      await expect(service.assignToUser(1, 7, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -269,22 +284,25 @@ describe('RolesService', () => {
       usersService.findById.mockResolvedValue({ id: 7 });
       userRolesRepo.findAssignment.mockResolvedValue({ userId: 7, roleId: 1 });
 
-      await expect(service.assignToUser(1, 7)).rejects.toThrow(
+      await expect(service.assignToUser(1, 7, ACTOR)).rejects.toThrow(
         ConflictException,
       );
       expect(userRolesRepo.assign).not.toHaveBeenCalled();
     });
 
     it('assign sukses kalau role & user ada dan belum pernah di-assign', async () => {
-      const { service, rolesRepo, usersService, userRolesRepo } =
+      const { service, rolesRepo, usersService, userRolesRepo, recordMock } =
         createService();
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       usersService.findById.mockResolvedValue({ id: 7 });
       userRolesRepo.findAssignment.mockResolvedValue(undefined);
 
-      await service.assignToUser(1, 7);
+      await service.assignToUser(1, 7, ACTOR);
 
       expect(userRolesRepo.assign).toHaveBeenCalledWith(7, 1);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'role.assign_user' }),
+      );
     });
   });
 
@@ -294,7 +312,7 @@ describe('RolesService', () => {
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       userRolesRepo.findAssignment.mockResolvedValue(undefined);
 
-      await expect(service.revokeFromUser(1, 7)).rejects.toThrow(
+      await expect(service.revokeFromUser(1, 7, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
       expect(userRolesRepo.revoke).not.toHaveBeenCalled();
@@ -305,7 +323,7 @@ describe('RolesService', () => {
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       userRolesRepo.findAssignment.mockResolvedValue({ userId: 7, roleId: 1 });
 
-      await service.revokeFromUser(1, 7);
+      await service.revokeFromUser(1, 7, ACTOR);
 
       expect(userRolesRepo.revoke).toHaveBeenCalledWith(7, 1);
     });

@@ -32,6 +32,8 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiStandardResponse } from '../../common/swagger/api-standard-response.decorator';
 import { SWAGGER_BEARER_AUTH_NAME } from '../../config/swagger.config';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { SafeUser } from '../users/types/safe-user.type';
 
 @ApiTags('Roles')
 @ApiBearerAuth(SWAGGER_BEARER_AUTH_NAME)
@@ -78,8 +80,11 @@ export class RolesController {
     description: 'Tidak memiliki permission role:create',
   })
   @ResponseMessage('Role berhasil dibuat')
-  create(@Body() dto: CreateRoleDto) {
-    return this.rolesService.create(dto);
+  create(@Body() dto: CreateRoleDto, @CurrentUser() user: SafeUser) {
+    return this.rolesService.create(dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Patch(':id')
@@ -95,8 +100,15 @@ export class RolesController {
     description: 'Tidak memiliki permission role:update',
   })
   @ResponseMessage('Role berhasil diperbarui')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateRoleDto) {
-    return this.rolesService.update(id, dto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateRoleDto,
+    @CurrentUser() user: SafeUser,
+  ) {
+    return this.rolesService.update(id, dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Delete(':id')
@@ -109,8 +121,11 @@ export class RolesController {
     description: 'Tidak memiliki permission role:delete',
   })
   @ResponseMessage('Role berhasil dihapus')
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.rolesService.delete(id);
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: SafeUser,
+  ) {
+    await this.rolesService.delete(id, { userId: user.id, email: user.email });
     return null;
   }
 
@@ -150,8 +165,12 @@ export class RolesController {
   syncPermissions(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SyncRolePermissionsDto,
+    @CurrentUser() user: SafeUser,
   ) {
-    return this.rolesService.syncPermissions(id, dto);
+    return this.rolesService.syncPermissions(id, dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Get(':id/users')
@@ -184,8 +203,12 @@ export class RolesController {
   async assignToUser(
     @Param('id', ParseIntPipe) id: number,
     @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: SafeUser,
   ) {
-    await this.rolesService.assignToUser(id, userId);
+    await this.rolesService.assignToUser(id, userId, {
+      userId: user.id,
+      email: user.email,
+    });
     return null;
   }
 
@@ -208,8 +231,12 @@ export class RolesController {
   async revokeFromUser(
     @Param('id', ParseIntPipe) id: number,
     @Param('userId', ParseIntPipe) userId: number,
+    @CurrentUser() user: SafeUser,
   ) {
-    await this.rolesService.revokeFromUser(id, userId);
+    await this.rolesService.revokeFromUser(id, userId, {
+      userId: user.id,
+      email: user.email,
+    });
     return null;
   }
 }

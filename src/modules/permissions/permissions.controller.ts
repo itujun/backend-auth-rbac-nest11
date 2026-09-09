@@ -28,6 +28,8 @@ import { RequirePermission } from '../../common/decorators/require-permission.de
 import { ResponseMessage } from '../../common/decorators/response-message.decorator';
 import { ApiStandardResponse } from '../../common/swagger/api-standard-response.decorator';
 import { SWAGGER_BEARER_AUTH_NAME } from '../../config/swagger.config';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { SafeUser } from '../users/types/safe-user.type';
 
 @ApiTags('Permissions')
 @ApiBearerAuth(SWAGGER_BEARER_AUTH_NAME)
@@ -78,8 +80,11 @@ export class PermissionsController {
     description: 'Tidak memiliki permission permission:create',
   })
   @ResponseMessage('Permission berhasil dibuat')
-  create(@Body() dto: CreatePermissionDto) {
-    return this.permissionsService.create(dto);
+  create(@Body() dto: CreatePermissionDto, @CurrentUser() user: SafeUser) {
+    return this.permissionsService.create(dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Patch(':id')
@@ -100,8 +105,12 @@ export class PermissionsController {
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdatePermissionDto,
+    @CurrentUser() user: SafeUser,
   ) {
-    return this.permissionsService.update(id, dto);
+    return this.permissionsService.update(id, dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Delete(':id')
@@ -114,8 +123,14 @@ export class PermissionsController {
     description: 'Tidak memiliki permission permission:delete',
   })
   @ResponseMessage('Permission berhasil dihapus')
-  async remove(@Param('id', ParseIntPipe) id: number) {
-    await this.permissionsService.delete(id);
+  async remove(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: SafeUser,
+  ) {
+    await this.permissionsService.delete(id, {
+      userId: user.id,
+      email: user.email,
+    });
     return null;
   }
 }

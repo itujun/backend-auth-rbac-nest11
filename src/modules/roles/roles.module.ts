@@ -6,9 +6,10 @@ import { RolePermissionsRepository } from './role-permissions.repository';
 import { UserRolesRepository } from './user-roles.repository';
 import { PermissionsModule } from '../permissions/permissions.module';
 import { UsersModule } from '../users/users.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
-  imports: [PermissionsModule, UsersModule],
+  imports: [PermissionsModule, UsersModule, AuditLogModule],
   controllers: [RolesController],
   providers: [
     RolesRepository,

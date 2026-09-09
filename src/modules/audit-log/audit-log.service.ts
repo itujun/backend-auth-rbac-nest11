@@ -26,6 +26,17 @@ export type AuditAction =
   | 'profile.avatar_update'
   | 'profile.avatar_reset';
 
+/**
+ * Identitas admin yang MELAKUKAN aksi CRUD (role/permission/dst) —
+ * beda dari actor di event auth (yang subjeknya user itu sendiri).
+ * Dipakai RolesService & PermissionsService supaya controller tidak
+ * perlu tahu bentuk `RecordAuditLogInput` yang lebih detail.
+ */
+export interface AuditActor {
+  userId: number;
+  email: string;
+}
+
 export interface RecordAuditLogInput {
   action: AuditAction;
   /** null untuk event tanpa actor jelas, mis. login gagal dengan email yang tidak terdaftar. */

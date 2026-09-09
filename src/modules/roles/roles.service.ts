@@ -12,6 +12,7 @@ import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { SyncRolePermissionsDto } from './dto/sync-role-permissions.dto';
 import { FindRolesQueryDto } from './dto/find-roles-query.dto';
+import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class RolesService {
@@ -21,6 +22,7 @@ export class RolesService {
     private readonly userRolesRepository: UserRolesRepository,
     private readonly permissionsService: PermissionsService,
     private readonly usersService: UsersService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   findAll(query: FindRolesQueryDto) {
@@ -35,15 +37,26 @@ export class RolesService {
     return role;
   }
 
-  async create(dto: CreateRoleDto) {
+  async create(dto: CreateRoleDto, actor: AuditActor) {
     const existing = await this.rolesRepository.findByName(dto.name);
     if (existing) {
       throw new ConflictException(`Role "${dto.name}" sudah ada`);
     }
-    return this.rolesRepository.create(dto);
+    const role = await this.rolesRepository.create(dto);
+
+    await this.auditLogService.record({
+      action: 'role.create',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'role',
+      resourceId: role.id,
+      metadata: { name: role.name },
+    });
+
+    return role;
   }
 
-  async update(id: number, dto: UpdateRoleDto) {
+  async update(id: number, dto: UpdateRoleDto, actor: AuditActor) {
     await this.findByIdOrThrow(id);
 
     if (dto.name) {
@@ -53,12 +66,32 @@ export class RolesService {
       }
     }
 
-    return this.rolesRepository.update(id, dto);
+    const role = await this.rolesRepository.update(id, dto);
+
+    await this.auditLogService.record({
+      action: 'role.update',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'role',
+      resourceId: id,
+      metadata: { changes: dto },
+    });
+
+    return role;
   }
 
-  async delete(id: number): Promise<void> {
-    await this.findByIdOrThrow(id);
+  async delete(id: number, actor: AuditActor): Promise<void> {
+    const role = await this.findByIdOrThrow(id);
     await this.rolesRepository.delete(id);
+
+    await this.auditLogService.record({
+      action: 'role.delete',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'role',
+      resourceId: id,
+      metadata: { name: role.name },
+    });
   }
 
   async listPermissions(roleId: number) {
@@ -66,7 +99,11 @@ export class RolesService {
     return this.rolePermissionsRepository.listPermissionsForRole(roleId);
   }
 
-  async syncPermissions(roleId: number, dto: SyncRolePermissionsDto) {
+  async syncPermissions(
+    roleId: number,
+    dto: SyncRolePermissionsDto,
+    actor: AuditActor,
+  ) {
     await this.findByIdOrThrow(roleId);
 
     // Validasi SEMUA permissionId yang dikirim benar-benar ada, sebelum
@@ -83,6 +120,15 @@ export class RolesService {
       dto.permissionIds,
     );
 
+    await this.auditLogService.record({
+      action: 'role.sync_permissions',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'role',
+      resourceId: roleId,
+      metadata: { permissionIds: dto.permissionIds },
+    });
+
     return this.rolePermissionsRepository.listPermissionsForRole(roleId);
   }
 
@@ -91,7 +137,7 @@ export class RolesService {
     return this.userRolesRepository.listUsersForRole(roleId);
   }
 
-  async assignToUser(roleId: number, userId: number) {
+  async assignToUser(roleId: number, userId: number, actor: AuditActor) {
     await this.findByIdOrThrow(roleId);
 
     const user = await this.usersService.findById(userId);
@@ -108,9 +154,22 @@ export class RolesService {
     }
 
     await this.userRolesRepository.assign(userId, roleId);
+
+    await this.auditLogService.record({
+      action: 'role.assign_user',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'user_role',
+      resourceId: `${roleId}:${userId}`,
+      metadata: { roleId, userId },
+    });
   }
 
-  async revokeFromUser(roleId: number, userId: number): Promise<void> {
+  async revokeFromUser(
+    roleId: number,
+    userId: number,
+    actor: AuditActor,
+  ): Promise<void> {
     await this.findByIdOrThrow(roleId);
 
     const existing = await this.userRolesRepository.findAssignment(
@@ -122,5 +181,14 @@ export class RolesService {
     }
 
     await this.userRolesRepository.revoke(userId, roleId);
+
+    await this.auditLogService.record({
+      action: 'role.revoke_user',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'user_role',
+      resourceId: `${roleId}:${userId}`,
+      metadata: { roleId, userId },
+    });
   }
 }

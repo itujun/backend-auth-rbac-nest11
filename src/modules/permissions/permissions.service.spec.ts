@@ -1,6 +1,9 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PermissionsService } from './permissions.service';
 import { PermissionsRepository } from './permissions.repository';
+import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
+
+const ACTOR: AuditActor = { userId: 99, email: 'admin@example.com' };
 
 function fakePermission(overrides: Record<string, unknown> = {}) {
   return {
@@ -22,10 +25,14 @@ function createService() {
     update: jest.fn(),
     delete: jest.fn(),
   };
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  const auditLogService = { record: recordMock };
+
   const service = new PermissionsService(
     repo as unknown as PermissionsRepository,
+    auditLogService as unknown as AuditLogService,
   );
-  return { service, repo };
+  return { service, repo, recordMock };
 }
 
 describe('PermissionsService', () => {
@@ -73,21 +80,27 @@ describe('PermissionsService', () => {
       const { service, repo } = createService();
       repo.findByName.mockResolvedValue(fakePermission());
 
-      await expect(service.create({ name: 'role:create' })).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.create({ name: 'role:create' }, ACTOR),
+      ).rejects.toThrow(ConflictException);
       expect(repo.create).not.toHaveBeenCalled();
     });
 
     it('membuat permission baru kalau nama belum dipakai', async () => {
-      const { service, repo } = createService();
+      const { service, repo, recordMock } = createService();
       repo.findByName.mockResolvedValue(undefined);
       repo.create.mockResolvedValue(fakePermission());
 
-      const result = await service.create({ name: 'role:create' });
+      const result = await service.create({ name: 'role:create' }, ACTOR);
 
       expect(repo.create).toHaveBeenCalledWith({ name: 'role:create' });
       expect(result).toEqual(fakePermission());
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'permission.create',
+          actorUserId: 99,
+        }),
+      );
     });
   });
 
@@ -96,7 +109,7 @@ describe('PermissionsService', () => {
       const { service, repo } = createService();
       repo.findById.mockResolvedValue(undefined);
 
-      await expect(service.update(1, { name: 'baru' })).rejects.toThrow(
+      await expect(service.update(1, { name: 'baru' }, ACTOR)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -108,9 +121,9 @@ describe('PermissionsService', () => {
         fakePermission({ id: 2, name: 'role:delete' }),
       );
 
-      await expect(service.update(1, { name: 'role:delete' })).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.update(1, { name: 'role:delete' }, ACTOR),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('MENGIZINKAN update kalau "nama yang sudah dipakai" itu milik permission ini sendiri', async () => {
@@ -119,10 +132,11 @@ describe('PermissionsService', () => {
       repo.findByName.mockResolvedValue(fakePermission({ id: 1 }));
       repo.update.mockResolvedValue(fakePermission({ description: 'baru' }));
 
-      await service.update(1, {
-        name: 'role:create',
-        description: 'baru',
-      });
+      await service.update(
+        1,
+        { name: 'role:create', description: 'baru' },
+        ACTOR,
+      );
 
       expect(repo.update).toHaveBeenCalledWith(1, {
         name: 'role:create',
@@ -135,7 +149,7 @@ describe('PermissionsService', () => {
       repo.findById.mockResolvedValue(fakePermission());
       repo.update.mockResolvedValue(fakePermission({ description: 'x' }));
 
-      await service.update(1, { description: 'x' });
+      await service.update(1, { description: 'x' }, ACTOR);
 
       expect(repo.findByName).not.toHaveBeenCalled();
     });
@@ -146,17 +160,23 @@ describe('PermissionsService', () => {
       const { service, repo } = createService();
       repo.findById.mockResolvedValue(undefined);
 
-      await expect(service.delete(1)).rejects.toThrow(NotFoundException);
+      await expect(service.delete(1, ACTOR)).rejects.toThrow(NotFoundException);
       expect(repo.delete).not.toHaveBeenCalled();
     });
 
-    it('menghapus permission kalau ditemukan', async () => {
-      const { service, repo } = createService();
+    it('menghapus permission kalau ditemukan & catat audit log', async () => {
+      const { service, repo, recordMock } = createService();
       repo.findById.mockResolvedValue(fakePermission());
 
-      await service.delete(1);
+      await service.delete(1, ACTOR);
 
       expect(repo.delete).toHaveBeenCalledWith(1);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'permission.delete',
+          actorUserId: 99,
+        }),
+      );
     });
   });
 });
