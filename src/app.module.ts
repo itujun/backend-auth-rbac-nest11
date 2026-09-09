@@ -8,6 +8,7 @@ import { validateEnv } from './config/env.validation';
 import { createLoggerOptions } from './config/logger.config';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './modules/health/health.module';
+import { AuditLogModule } from './modules/audit-log/audit-log.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { AuthorizationModule } from './core/authorization/authorization.module';
@@ -53,6 +54,7 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
     }),
     DatabaseModule,
     HealthModule,
+    AuditLogModule,
     // URUTAN IMPORT INI PENTING: NestJS menjalankan beberapa provider
     // APP_GUARD sesuai urutan modul di-resolve. AuthModule (JwtAuthGuard,
     // yang mengisi `request.user`) HARUS di-import SEBELUM

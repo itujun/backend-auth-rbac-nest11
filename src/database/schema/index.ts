@@ -5,6 +5,7 @@ export * from './permissions.schema';
 export * from './role-permissions.schema';
 export * from './user-roles.schema';
 export * from './refresh-tokens.schema';
+export * from './audit-logs.schema';
 
 import { users, usersRelations } from './users.schema';
 import { profiles, profilesRelations } from './profiles.schema';
@@ -16,6 +17,7 @@ import {
 } from './role-permissions.schema';
 import { userRoles, userRolesRelations } from './user-roles.schema';
 import { refreshTokens, refreshTokensRelations } from './refresh-tokens.schema';
+import { auditLogs, auditLogsRelations } from './audit-logs.schema';
 
 /**
  * Objek gabungan semua schema + relations, dipakai saat inisialisasi
@@ -37,4 +39,6 @@ export const schema = {
   userRolesRelations,
   refreshTokens,
   refreshTokensRelations,
+  auditLogs,
+  auditLogsRelations,
 };
