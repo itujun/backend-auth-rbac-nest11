@@ -780,6 +780,25 @@ curl -X POST http://localhost:3000/api/permissions \
   - [x] Security hardening — Helmet (header keamanan, CSP dimatikan khusus saat Swagger aktif, CORP `cross-origin` untuk avatar), rate limiting global via `@nestjs/throttler` + limit lebih ketat khusus di `/auth/register`, `/auth/login`, `/auth/refresh`. Cookie flags (httpOnly/secure/sameSite) sudah benar sejak awal (lihat `RefreshCookieHelper`).
   - [x] Structured logging (`nestjs-pino`) — JSON di production, pretty-print berwarna di development (`LOG_LEVEL`/`LOG_PRETTY`), redact otomatis header `Authorization`/`Cookie`/`Set-Cookie`, level log mengikuti status HTTP (4xx→warn, 5xx→error), health check dikecualikan dari auto-log biar tidak jadi noise.
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
+  - [x] Redis caching (permission checks) — cache-aside pada
+        `AuthorizationService` via `PermissionsCacheService` (key
+        `permissions:user:{id}`, TTL 300s sebagai jaring pengaman,
+        fail-safe penuh terhadap error Redis). Invalidation eksplisit
+        terpasang di 5 titik mutasi: - `RolesService.assignToUser` / `revokeFromUser` — invalidate
+        1 user (`invalidateUser`) - `RolesService.syncPermissions` — invalidate SEMUA user
+        pemegang role itu (`invalidateUsers`) - `RolesService.delete` — daftar user diambil **sebelum**
+        delete (`ON DELETE CASCADE` menghapus baris `user_roles`
+        begitu role dihapus) - `PermissionsService.delete` — fan-out lintas SEMUA role
+        yang punya permission ini, via satu query JOIN di
+        `AuthorizationRepository.findUserIdsAffectedByPermission`,
+        diambil **sebelum** delete (alasan cascade sama seperti di
+        atas) - `PermissionsService.update` — HANYA kalau `name` benar-benar
+        berubah (cache menyimpan nama permission, bukan ID; ganti
+        `description` saja tidak perlu invalidation)
+        `RedisModule` (Docker Compose `redis:7-alpine`, health check
+        terpisah dari aggregator utama) dan test unit lengkap di
+        `permissions-cache.service.spec.ts`, `authorization.service.spec.ts`,
+        `roles.service.spec.ts`, `permissions.service.spec.ts`.
   - [~] Testing — **unit test SELESAI** (~140 test: util murni, guards,
     filter/interceptor, `AuthService`, `RefreshTokensService`,
     `UsersService`, `ProfilesService`, `AvatarStorageService`,

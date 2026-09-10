@@ -5,6 +5,7 @@ import { RolePermissionsRepository } from './role-permissions.repository';
 import { UserRolesRepository } from './user-roles.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { UsersService } from '../users/users.service';
+import { PermissionsCacheService } from '../../core/authorization/permissions-cache.service';
 import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
 
 const ACTOR: AuditActor = { userId: 99, email: 'admin@example.com' };
@@ -34,7 +35,10 @@ function createService() {
     syncPermissions: jest.fn(),
   };
   const userRolesRepo = {
-    listUsersForRole: jest.fn(),
+    // Default [] supaya test yang tidak peduli soal invalidation
+    // (mis. test validasi error di awal method) tidak perlu ikut
+    // mock ini satu-satu -- cukup override di test yang relevan.
+    listUsersForRole: jest.fn().mockResolvedValue([]),
     findAssignment: jest.fn(),
     assign: jest.fn(),
     revoke: jest.fn(),
@@ -43,6 +47,10 @@ function createService() {
   const usersService = { findById: jest.fn() };
   const recordMock = jest.fn().mockResolvedValue(undefined);
   const auditLogService = { record: recordMock };
+  const permissionsCache = {
+    invalidateUser: jest.fn().mockResolvedValue(undefined),
+    invalidateUsers: jest.fn().mockResolvedValue(undefined),
+  };
 
   const service = new RolesService(
     rolesRepo as unknown as RolesRepository,
@@ -51,6 +59,7 @@ function createService() {
     permissionsService as unknown as PermissionsService,
     usersService as unknown as UsersService,
     auditLogService as unknown as AuditLogService,
+    permissionsCache as unknown as PermissionsCacheService,
   );
 
   return {
@@ -61,6 +70,7 @@ function createService() {
     permissionsService,
     usersService,
     recordMock,
+    permissionsCache,
   };
 }
 
@@ -171,6 +181,17 @@ describe('RolesService', () => {
 
       expect(rolesRepo.findByName).not.toHaveBeenCalled();
     });
+
+    it('TIDAK invalidate cache permission apapun -- rename ROLE tidak mengubah nama PERMISSION yang di-cache', async () => {
+      const { service, rolesRepo, permissionsCache } = createService();
+      rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1, name: 'editor' }));
+      rolesRepo.update.mockResolvedValue(fakeRole({ name: 'senior-editor' }));
+
+      await service.update(1, { name: 'senior-editor' }, ACTOR);
+
+      expect(permissionsCache.invalidateUser).not.toHaveBeenCalled();
+      expect(permissionsCache.invalidateUsers).not.toHaveBeenCalled();
+    });
   });
 
   describe('delete', () => {
@@ -182,7 +203,7 @@ describe('RolesService', () => {
       expect(rolesRepo.delete).not.toHaveBeenCalled();
     });
 
-    it('menghapus role kalau ditemukan', async () => {
+    it('menghapus role kalau ditemukan & catat audit log', async () => {
       const { service, rolesRepo, recordMock } = createService();
       rolesRepo.findById.mockResolvedValue(fakeRole());
 
@@ -192,6 +213,33 @@ describe('RolesService', () => {
       expect(recordMock).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'role.delete', actorUserId: 99 }),
       );
+    });
+
+    it('invalidate cache SEMUA user pemegang role ini', async () => {
+      const { service, rolesRepo, userRolesRepo, permissionsCache } =
+        createService();
+      rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
+      userRolesRepo.listUsersForRole.mockResolvedValue([
+        { id: 5, email: 'a@x.com', isActive: true },
+        { id: 6, email: 'b@x.com', isActive: true },
+      ]);
+
+      await service.delete(1, ACTOR);
+
+      expect(permissionsCache.invalidateUsers).toHaveBeenCalledWith([5, 6]);
+    });
+
+    it('mengambil daftar user SEBELUM memanggil rolesRepository.delete -- supaya tidak kena ON DELETE CASCADE duluan', async () => {
+      const { service, rolesRepo, userRolesRepo } = createService();
+      rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
+      userRolesRepo.listUsersForRole.mockResolvedValue([{ id: 5 }]);
+
+      await service.delete(1, ACTOR);
+
+      const listCallOrder =
+        userRolesRepo.listUsersForRole.mock.invocationCallOrder[0];
+      const deleteCallOrder = rolesRepo.delete.mock.invocationCallOrder[0];
+      expect(listCallOrder).toBeLessThan(deleteCallOrder);
     });
   });
 
@@ -251,6 +299,29 @@ describe('RolesService', () => {
       );
       expect(result).toEqual(['p1', 'p2']);
     });
+
+    it('invalidate cache SEMUA user pemegang role ini -- bukan cuma satu user', async () => {
+      const {
+        service,
+        rolesRepo,
+        permissionsService,
+        userRolesRepo,
+        permissionsCache,
+      } = createService();
+      rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
+      permissionsService.findByIdOrThrow.mockResolvedValue({});
+      userRolesRepo.listUsersForRole.mockResolvedValue([
+        { id: 10, email: 'a@x.com', isActive: true },
+        { id: 20, email: 'b@x.com', isActive: true },
+        { id: 30, email: 'c@x.com', isActive: true },
+      ]);
+
+      await service.syncPermissions(1, { permissionIds: [1, 2] }, ACTOR);
+
+      expect(permissionsCache.invalidateUsers).toHaveBeenCalledWith([
+        10, 20, 30,
+      ]);
+    });
   });
 
   describe('listUsers', () => {
@@ -290,9 +361,15 @@ describe('RolesService', () => {
       expect(userRolesRepo.assign).not.toHaveBeenCalled();
     });
 
-    it('assign sukses kalau role & user ada dan belum pernah di-assign', async () => {
-      const { service, rolesRepo, usersService, userRolesRepo, recordMock } =
-        createService();
+    it('assign sukses kalau role & user ada dan belum pernah di-assign, lalu invalidate cache SATU user itu', async () => {
+      const {
+        service,
+        rolesRepo,
+        usersService,
+        userRolesRepo,
+        recordMock,
+        permissionsCache,
+      } = createService();
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       usersService.findById.mockResolvedValue({ id: 7 });
       userRolesRepo.findAssignment.mockResolvedValue(undefined);
@@ -303,6 +380,10 @@ describe('RolesService', () => {
       expect(recordMock).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'role.assign_user' }),
       );
+      expect(permissionsCache.invalidateUser).toHaveBeenCalledWith(7);
+      // BUKAN invalidateUsers (bulk) -- dampaknya cuma 1 user, harus
+      // pakai jalur single-key yang lebih murah.
+      expect(permissionsCache.invalidateUsers).not.toHaveBeenCalled();
     });
   });
 
@@ -318,14 +399,16 @@ describe('RolesService', () => {
       expect(userRolesRepo.revoke).not.toHaveBeenCalled();
     });
 
-    it('revoke sukses kalau assignment ditemukan', async () => {
-      const { service, rolesRepo, userRolesRepo } = createService();
+    it('revoke sukses kalau assignment ditemukan, lalu invalidate cache SATU user itu', async () => {
+      const { service, rolesRepo, userRolesRepo, permissionsCache } =
+        createService();
       rolesRepo.findById.mockResolvedValue(fakeRole({ id: 1 }));
       userRolesRepo.findAssignment.mockResolvedValue({ userId: 7, roleId: 1 });
 
       await service.revokeFromUser(1, 7, ACTOR);
 
       expect(userRolesRepo.revoke).toHaveBeenCalledWith(7, 1);
+      expect(permissionsCache.invalidateUser).toHaveBeenCalledWith(7);
     });
   });
 });

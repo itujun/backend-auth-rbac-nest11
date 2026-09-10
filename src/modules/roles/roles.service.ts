@@ -8,6 +8,7 @@ import { RolePermissionsRepository } from './role-permissions.repository';
 import { UserRolesRepository } from './user-roles.repository';
 import { PermissionsService } from '../permissions/permissions.service';
 import { UsersService } from '../users/users.service';
+import { PermissionsCacheService } from '../../core/authorization/permissions-cache.service';
 import { CreateRoleDto } from './dto/create-role.dto';
 import { UpdateRoleDto } from './dto/update-role.dto';
 import { SyncRolePermissionsDto } from './dto/sync-role-permissions.dto';
@@ -23,6 +24,7 @@ export class RolesService {
     private readonly permissionsService: PermissionsService,
     private readonly usersService: UsersService,
     private readonly auditLogService: AuditLogService,
+    private readonly permissionsCache: PermissionsCacheService,
   ) {}
 
   findAll(query: FindRolesQueryDto) {
@@ -82,6 +84,15 @@ export class RolesService {
 
   async delete(id: number, actor: AuditActor): Promise<void> {
     const role = await this.findByIdOrThrow(id);
+
+    // HARUS diambil SEBELUM delete, bukan sesudah. `ON DELETE CASCADE`
+    // di schema `user_roles` akan otomatis menghapus baris-baris yang
+    // mereferensikan role ini begitu role-nya dihapus -- kalau daftar
+    // user ini diambil SESUDAH delete, query-nya cuma akan
+    // mengembalikan array kosong (karena baris relasinya sudah lenyap),
+    // dan tidak ada user yang benar-benar ter-invalidate cache-nya.
+    const affectedUsers = await this.userRolesRepository.listUsersForRole(id);
+
     await this.rolesRepository.delete(id);
 
     await this.auditLogService.record({
@@ -92,6 +103,10 @@ export class RolesService {
       resourceId: id,
       metadata: { name: role.name },
     });
+
+    await this.permissionsCache.invalidateUsers(
+      affectedUsers.map((user) => user.id),
+    );
   }
 
   async listPermissions(roleId: number) {
@@ -129,6 +144,18 @@ export class RolesService {
       metadata: { permissionIds: dto.permissionIds },
     });
 
+    // Sync permission SATU role berdampak ke SEMUA user yang memegang
+    // role itu -- bukan cuma satu user seperti assign/revoke. Diambil
+    // SESUDAH sync (bukan sebelum) tidak masalah di sini, karena
+    // sync_permissions cuma mengubah baris `role_permissions`, sama
+    // sekali tidak menyentuh `user_roles` -- daftar siapa saja pemegang
+    // role ini tidak berubah akibat operasi ini.
+    const affectedUsers =
+      await this.userRolesRepository.listUsersForRole(roleId);
+    await this.permissionsCache.invalidateUsers(
+      affectedUsers.map((user) => user.id),
+    );
+
     return this.rolePermissionsRepository.listPermissionsForRole(roleId);
   }
 
@@ -163,6 +190,10 @@ export class RolesService {
       resourceId: `${roleId}:${userId}`,
       metadata: { roleId, userId },
     });
+
+    // Dampak assign HANYA ke satu user ini -- tidak perlu fan-out
+    // query seperti syncPermissions, cukup invalidate satu key.
+    await this.permissionsCache.invalidateUser(userId);
   }
 
   async revokeFromUser(
@@ -190,5 +221,12 @@ export class RolesService {
       resourceId: `${roleId}:${userId}`,
       metadata: { roleId, userId },
     });
+
+    // Titik PALING kritis dari semua invalidation di file ini: kalau
+    // ini gagal diam-diam, user yang HARUSNYA sudah kehilangan akses
+    // tetap bisa memakai permission lama sampai TTL cache habis (lihat
+    // PermissionsCacheService.invalidateUser -- makanya kegagalan di
+    // situ di-log sebagai ERROR, bukan WARN).
+    await this.permissionsCache.invalidateUser(userId);
   }
 }

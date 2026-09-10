@@ -21,4 +21,34 @@ export class AuthorizationRepository extends BaseRepository {
 
     return rows.map((row) => row.name);
   }
+
+  /**
+   * Cari SEMUA user yang terdampak kalau sebuah permission dihapus atau
+   * berubah nama -- yaitu user manapun yang memegang role yang (saat
+   * ini) memiliki permission tersebut.
+   *
+   * Dipakai PermissionsService untuk fan-out invalidation cache. Query
+   * ini SENGAJA cuma JOIN role_permissions -> user_roles (tanpa perlu
+   * tabel `permissions` sama sekali) -- cukup filter by `permissionId`
+   * di role_permissions, lalu ambil semua userId yang punya salah satu
+   * role terkait. Satu round-trip ke Postgres, bukan "cari roleId dulu,
+   * lalu cari userId" dua query terpisah.
+   *
+   * PENTING soal urutan pemanggilan: method ini HARUS dipanggil SEBELUM
+   * permission-nya benar-benar dihapus dari DB. Setelah dihapus, baris
+   * role_permissions yang mereferensikannya sudah ikut lenyap lewat
+   * `ON DELETE CASCADE`, jadi query ini akan mengembalikan array kosong
+   * -- fan-out invalidation-nya jadi tidak berguna sama sekali.
+   */
+  async findUserIdsAffectedByPermission(
+    permissionId: number,
+  ): Promise<number[]> {
+    const rows = await this.db
+      .selectDistinct({ userId: userRoles.userId })
+      .from(rolePermissions)
+      .innerJoin(userRoles, eq(rolePermissions.roleId, userRoles.roleId))
+      .where(eq(rolePermissions.permissionId, permissionId));
+
+    return rows.map((row) => row.userId);
+  }
 }

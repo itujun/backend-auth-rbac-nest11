@@ -2,6 +2,8 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { PermissionsService } from './permissions.service';
 import { PermissionsRepository } from './permissions.repository';
 import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
+import { PermissionsCacheService } from '../../core/authorization/permissions-cache.service';
+import { AuthorizationRepository } from '../../core/authorization/authorization.repository';
 
 const ACTOR: AuditActor = { userId: 99, email: 'admin@example.com' };
 
@@ -27,12 +29,30 @@ function createService() {
   };
   const recordMock = jest.fn().mockResolvedValue(undefined);
   const auditLogService = { record: recordMock };
+  const permissionsCache = {
+    invalidateUser: jest.fn().mockResolvedValue(undefined),
+    invalidateUsers: jest.fn().mockResolvedValue(undefined),
+  };
+  const authorizationRepository = {
+    // Default [] supaya test yang tidak peduli soal fan-out
+    // invalidation (create/update tanpa rename/dst) tidak perlu ikut
+    // mock ini satu-satu.
+    findUserIdsAffectedByPermission: jest.fn().mockResolvedValue([]),
+  };
 
   const service = new PermissionsService(
     repo as unknown as PermissionsRepository,
     auditLogService as unknown as AuditLogService,
+    permissionsCache as unknown as PermissionsCacheService,
+    authorizationRepository as unknown as AuthorizationRepository,
   );
-  return { service, repo, recordMock };
+  return {
+    service,
+    repo,
+    recordMock,
+    permissionsCache,
+    authorizationRepository,
+  };
 }
 
 describe('PermissionsService', () => {
@@ -153,6 +173,61 @@ describe('PermissionsService', () => {
 
       expect(repo.findByName).not.toHaveBeenCalled();
     });
+
+    it('TIDAK invalidate cache apapun kalau cuma ubah description (nama tidak berubah)', async () => {
+      const { service, repo, permissionsCache, authorizationRepository } =
+        createService();
+      repo.findById.mockResolvedValue(fakePermission({ id: 1 }));
+      repo.update.mockResolvedValue(
+        fakePermission({ description: 'deskripsi baru' }),
+      );
+
+      await service.update(1, { description: 'deskripsi baru' }, ACTOR);
+
+      expect(
+        authorizationRepository.findUserIdsAffectedByPermission,
+      ).not.toHaveBeenCalled();
+      expect(permissionsCache.invalidateUsers).not.toHaveBeenCalled();
+    });
+
+    it('TIDAK invalidate cache kalau "rename" ternyata nilainya sama persis dengan nama lama (no-op)', async () => {
+      const { service, repo, permissionsCache, authorizationRepository } =
+        createService();
+      repo.findById.mockResolvedValue(
+        fakePermission({ id: 1, name: 'role:create' }),
+      );
+      repo.findByName.mockResolvedValue(
+        fakePermission({ id: 1, name: 'role:create' }),
+      );
+      repo.update.mockResolvedValue(fakePermission({ name: 'role:create' }));
+
+      await service.update(1, { name: 'role:create' }, ACTOR);
+
+      expect(
+        authorizationRepository.findUserIdsAffectedByPermission,
+      ).not.toHaveBeenCalled();
+      expect(permissionsCache.invalidateUsers).not.toHaveBeenCalled();
+    });
+
+    it('RENAME sungguhan: invalidate cache SEMUA user yang terdampak lewat role manapun', async () => {
+      const { service, repo, permissionsCache, authorizationRepository } =
+        createService();
+      repo.findById.mockResolvedValue(
+        fakePermission({ id: 1, name: 'role:create' }),
+      );
+      repo.findByName.mockResolvedValue(undefined);
+      repo.update.mockResolvedValue(fakePermission({ name: 'role:make' }));
+      authorizationRepository.findUserIdsAffectedByPermission.mockResolvedValue(
+        [1, 2, 3],
+      );
+
+      await service.update(1, { name: 'role:make' }, ACTOR);
+
+      expect(
+        authorizationRepository.findUserIdsAffectedByPermission,
+      ).toHaveBeenCalledWith(1);
+      expect(permissionsCache.invalidateUsers).toHaveBeenCalledWith([1, 2, 3]);
+    });
   });
 
   describe('delete', () => {
@@ -177,6 +252,37 @@ describe('PermissionsService', () => {
           actorUserId: 99,
         }),
       );
+    });
+
+    it('invalidate cache SEMUA user yang terdampak lintas SEMUA role yang punya permission ini', async () => {
+      const { service, repo, permissionsCache, authorizationRepository } =
+        createService();
+      repo.findById.mockResolvedValue(fakePermission({ id: 1 }));
+      authorizationRepository.findUserIdsAffectedByPermission.mockResolvedValue(
+        [1, 2, 3, 4],
+      );
+
+      await service.delete(1, ACTOR);
+
+      expect(
+        authorizationRepository.findUserIdsAffectedByPermission,
+      ).toHaveBeenCalledWith(1);
+      expect(permissionsCache.invalidateUsers).toHaveBeenCalledWith([
+        1, 2, 3, 4,
+      ]);
+    });
+
+    it('mengambil daftar user terdampak SEBELUM memanggil repo.delete -- supaya tidak kena ON DELETE CASCADE duluan', async () => {
+      const { service, repo, authorizationRepository } = createService();
+      repo.findById.mockResolvedValue(fakePermission({ id: 1 }));
+
+      await service.delete(1, ACTOR);
+
+      const findCallOrder =
+        authorizationRepository.findUserIdsAffectedByPermission.mock
+          .invocationCallOrder[0];
+      const deleteCallOrder = repo.delete.mock.invocationCallOrder[0];
+      expect(findCallOrder).toBeLessThan(deleteCallOrder);
     });
   });
 });
