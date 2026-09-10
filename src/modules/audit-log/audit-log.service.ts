@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuditLogRepository } from './audit-log.repository';
+import { FindAuditLogsQueryDto } from './dto/find-audit-logs-query.dto';
 
 /**
  * Union string literal (BUKAN enum Postgres — lihat komentar di
@@ -54,6 +55,10 @@ export class AuditLogService {
   private readonly logger = new Logger(AuditLogService.name);
 
   constructor(private readonly auditLogRepository: AuditLogRepository) {}
+
+  findAll(query: FindAuditLogsQueryDto) {
+    return this.auditLogRepository.findAll(query);
+  }
 
   /**
    * SENGAJA tidak pernah melempar exception ke pemanggil. Audit log

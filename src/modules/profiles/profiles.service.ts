@@ -6,12 +6,14 @@ import {
 import { ProfilesRepository, UpdateProfileFields } from './profiles.repository';
 import { AvatarStorageService } from './storage/avatar-storage.service';
 import { DEFAULT_AVATAR_URL } from '../../database/schema';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class ProfilesService {
   constructor(
     private readonly profilesRepository: ProfilesRepository,
     private readonly avatarStorageService: AvatarStorageService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   async getByUserIdOrThrow(userId: number) {
@@ -64,6 +66,17 @@ export class ProfilesService {
     // tengah jalan, user tidak berakhir tanpa avatar sama sekali.
     await this.avatarStorageService.deleteIfCustom(oldAvatarUrl);
 
+    // Selalu self-service (userId = orang yang upload avatar-nya
+    // sendiri) — tidak ada endpoint admin untuk ganti avatar user lain,
+    // makanya tidak butuh parameter `actor` terpisah seperti di
+    // RolesService/PermissionsService.
+    await this.auditLogService.record({
+      action: 'profile.avatar_update',
+      actorUserId: userId,
+      resourceType: 'profile',
+      resourceId: userId,
+    });
+
     return updated;
   }
 
@@ -74,6 +87,18 @@ export class ProfilesService {
       await this.avatarStorageService.deleteIfCustom(profile.avatarUrl);
     }
 
-    return this.profilesRepository.updateAvatarUrl(userId, DEFAULT_AVATAR_URL);
+    const updated = await this.profilesRepository.updateAvatarUrl(
+      userId,
+      DEFAULT_AVATAR_URL,
+    );
+
+    await this.auditLogService.record({
+      action: 'profile.avatar_reset',
+      actorUserId: userId,
+      resourceType: 'profile',
+      resourceId: userId,
+    });
+
+    return updated;
   }
 }

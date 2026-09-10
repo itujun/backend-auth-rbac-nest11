@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { ProfilesRepository } from './profiles.repository';
 import { AvatarStorageService } from './storage/avatar-storage.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { DEFAULT_AVATAR_URL } from '../../database/schema';
 
 function fakeProfile(overrides: Record<string, unknown> = {}) {
@@ -35,7 +36,14 @@ function createService() {
     deleteIfCustom: deleteIfCustomMock,
   } as unknown as AvatarStorageService;
 
-  const service = new ProfilesService(profilesRepository, avatarStorageService);
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  const auditLogService = { record: recordMock } as unknown as AuditLogService;
+
+  const service = new ProfilesService(
+    profilesRepository,
+    avatarStorageService,
+    auditLogService,
+  );
 
   return {
     service,
@@ -43,6 +51,7 @@ function createService() {
     updateByUserIdMock,
     updateAvatarUrlMock,
     saveAvatarMock,
+    recordMock,
     deleteIfCustomMock,
   };
 }
@@ -135,6 +144,7 @@ describe('ProfilesService', () => {
         updateAvatarUrlMock,
         saveAvatarMock,
         deleteIfCustomMock,
+        recordMock,
       } = createService();
       const callOrder: string[] = [];
       findByUserIdMock.mockResolvedValue(
@@ -173,6 +183,12 @@ describe('ProfilesService', () => {
         'updateAvatarUrl',
         'deleteIfCustom',
       ]);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'profile.avatar_update',
+          actorUserId: 1,
+        }),
+      );
     });
   });
 
@@ -183,6 +199,7 @@ describe('ProfilesService', () => {
         findByUserIdMock,
         deleteIfCustomMock,
         updateAvatarUrlMock,
+        recordMock,
       } = createService();
       findByUserIdMock.mockResolvedValue(
         fakeProfile({ avatarUrl: DEFAULT_AVATAR_URL }),
@@ -192,6 +209,9 @@ describe('ProfilesService', () => {
 
       expect(deleteIfCustomMock).not.toHaveBeenCalled();
       expect(updateAvatarUrlMock).toHaveBeenCalledWith(1, DEFAULT_AVATAR_URL);
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'profile.avatar_reset' }),
+      );
     });
 
     it('menghapus avatar lama kalau sebelumnya custom, lalu reset ke default', async () => {
