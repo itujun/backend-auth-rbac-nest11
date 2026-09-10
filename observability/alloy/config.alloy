@@ -1,0 +1,91 @@
+// === Discovery ===
+// Alloy terhubung ke Docker socket HOST untuk menemukan SEMUA container
+// yang jalan di mesin ini -- bukan cuma milik project ini (kalau ada
+// project Docker Compose lain yang kebetulan jalan bersamaan di laptop
+// yang sama, container-nya ikut "kelihatan" di sini). Makanya WAJIB
+// difilter lewat discovery.relabel di bawah, SEBELUM benar-benar
+// ditarik log-nya.
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// === Filter: cuma pertahankan container milik project INI ===
+discovery.relabel "rbac_containers" {
+  targets = discovery.docker.containers.targets
+
+  // `name: rbac-backend` di-set eksplisit di root docker-compose.yml --
+  // BUKAN mengandalkan nama folder tempat project di-unzip/clone (yang
+  // bisa beda-beda di tiap mesin, mis. "backend-auth-rbac-nest11" vs
+  // "rbac-final-v2"). Docker Compose otomatis menempelkan nama project
+  // ini sebagai label `com.docker.compose.project` di SETIAP container
+  // yang dia buat, jadi filter ini konsisten di mesin siapapun.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "rbac-backend"
+    action        = "keep"
+  }
+
+  // Docker selalu awali nama container di metadata internalnya dengan
+  // "/" (mis. "/rbac_postgres") -- dibuang di sini supaya label
+  // `container` yang tampil di Grafana nanti bersih ("rbac_postgres",
+  // bukan "/rbac_postgres").
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+// === Tarik log tiap container yang lolos filter ===
+loki.source.docker "rbac_containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.rbac_containers.output
+  relabel_rules = discovery.relabel.rbac_containers.rules
+  forward_to    = [loki.process.parse_json.receiver]
+}
+
+// === Proses: promosikan field `level` jadi LABEL, field lain BIARKAN
+//     tetap di isi log (diparsing nanti saat query, bukan sekarang) ===
+loki.process "parse_json" {
+  forward_to = [loki.write.default.receiver]
+
+  // Parsing PENUH (semua field: reqId, userId, msg, dst) SENGAJA TIDAK
+  // dilakukan di sini -- itu tugas QUERY TIME lewat LogQL `| json` saat
+  // buka Grafana Explore, bukan tugas INGESTION TIME di sini.
+  stage.json {
+    expressions = {
+      level = "level",
+    }
+  }
+
+  // `level` SENGAJA dipromosikan jadi LABEL (bukan cuma isi log biasa),
+  // dengan alasan spesifik:
+  // 1. Cardinality-nya RENDAH & TETAP -- cuma ~6 nilai yang mungkin
+  //    (trace/debug/info/warn/error/fatal, lihat formatters.level di
+  //    logger.config.ts yang mengubahnya dari angka pino jadi nama).
+  //    Aman dijadikan label Loki.
+  // 2. Bikin query "tampilkan CUMA level=error lintas SEMUA container"
+  //    jadi index lookup yang murah, bukan scan isi log satu-satu.
+  //
+  // Field LAIN seperti `reqId`/`userId`/`msg` SENGAJA TIDAK dijadikan
+  // label di sini -- cardinality-nya TINGGI (reqId beda-beda di TIAP
+  // request), kalau dipaksa jadi label akan meledakkan index Loki
+  // ("cardinality explosion" -- salah satu kesalahan paling umum
+  // pemula Loki/Prometheus, dan salah satu yang paling mahal untuk
+  // diperbaiki belakangan karena butuh migrasi skema index). Field-
+  // field itu TETAP bisa dicari kok, cukup lewat
+  // `| json | reqId = "xxx"` di LogQL saat query -- bedanya cuma
+  // dievaluasi saat query dijalankan, bukan di-index permanen selamanya.
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+}
+
+// === Kirim ke Loki ===
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

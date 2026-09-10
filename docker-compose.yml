@@ -1,3 +1,11 @@
+# Nama project di-set EKSPLISIT (bukan mengandalkan nama folder tempat
+# project ini di-clone/unzip, yang bisa beda-beda di tiap mesin) --
+# dipakai Alloy (observability/alloy/config.alloy) untuk memfilter,
+# supaya cuma container project INI yang log-nya ditarik ke Loki, bukan
+# ikut menarik log project Docker Compose lain yang kebetulan jalan
+# bersamaan di laptop yang sama.
+name: rbac-backend
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -44,6 +52,122 @@ services:
       timeout: 5s
       retries: 5
 
+  # Versi di-pin ke tag stabil spesifik (dicek per Sep 2026) -- BUKAN
+  # `:latest`, alasan sama persis seperti Postgres/Redis di atas.
+  # Silakan cek ulang & sesuaikan ke rilis stabil terbaru sewaktu-waktu.
+  loki:
+    image: grafana/loki:3.6.6
+    container_name: rbac_loki
+    restart: unless-stopped
+    ports:
+      - '3100:3100'
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - rbac_lokidata:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/ready || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Alloy butuh akses Docker socket HOST (read-only) untuk bisa
+  # menemukan & membaca log container lain -- lihat penjelasan lengkap
+  # di observability/alloy/config.alloy soal cara kerja & filternya.
+  alloy:
+    image: grafana/alloy:v1.18.1
+    container_name: rbac_alloy
+    restart: unless-stopped
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+    ports:
+      # UI debug Alloy (lihat status pipeline, komponen mana yang
+      # error, dst) -- bukan untuk log kamu sendiri, itu di Grafana.
+      - '12345:12345'
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # Host port SENGAJA 3300 (bukan 3000 default image) -- port 3000 di
+  # HOST sudah dipakai app NestJS kamu sendiri (`npm run start:dev`,
+  # lihat `app.port` di configuration.ts). Kalau dipaksa sama-sama
+  # 3000, salah satu bakal gagal start karena "port already in use".
+  grafana:
+    image: grafana/grafana:12.1.0
+    container_name: rbac_grafana
+    restart: unless-stopped
+    ports:
+      - '3300:3000'
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - rbac_grafanadata:/var/lib/grafana
+    environment:
+      # Login anonim SEBAGAI ADMIN -- HANYA masuk akal untuk dev lokal
+      # di laptop sendiri (bukan diekspos ke jaringan/internet). Untuk
+      # deployment yang benar-benar dipakai tim/publik, WAJIB matikan
+      # ini dan pakai autentikasi Grafana yang semestinya.
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: 'Admin'
+      GF_AUTH_DISABLE_LOGIN_FORM: 'true'
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  # === OPSIONAL, HANYA untuk demo/verifikasi pipeline observability ===
+  # TIDAK ikut jalan di `docker compose up -d` biasa (perlu
+  # `--profile full` eksplisit) -- workflow harian tetap
+  # `npm run start:dev` di host seperti biasa (lebih cepat, tanpa
+  # lapisan container).
+  #
+  # Kenapa perlu container terpisah sama sekali: Alloy CUMA bisa
+  # menemukan & membaca log lewat Docker socket -- App yang jalan
+  # langsung di host (`npm run start:dev`) TIDAK PERNAH terlihat oleh
+  # Alloy sama sekali, walau log-nya sendiri sudah benar (JSON ke
+  # stdout, lihat logger.config.ts). Tanpa service ini, Loki cuma akan
+  # berisi log Postgres/Redis/Loki/Alloy/Grafana sendiri -- BUKAN log
+  # request API yang sebenarnya paling ingin kamu lacak.
+  app:
+    profiles: ['full']
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: rbac_app
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      # Override HANYA hostname koneksi -- di dalam network Docker
+      # Compose, service lain dipanggil lewat NAMA SERVICE ("postgres",
+      # "redis"), bukan "localhost" (yang di dalam container merujuk ke
+      # container itu sendiri, bukan host). Variabel lain (JWT secret,
+      # dst) tetap ikut dari `.env` lewat `env_file` di atas.
+      DATABASE_URL: postgres://rbac_user:rbac_password@postgres:5432/rbac_db
+      REDIS_HOST: redis
+    volumes:
+      - .:/app
+      # Anonymous volume ini SENGAJA "menimpa" bind mount di atas KHUSUS
+      # untuk folder node_modules -- kalau tidak, node_modules dari HOST
+      # (mis. hasil compile native addon `argon2`/`sharp` untuk
+      # macOS/Windows) akan menimpa node_modules Linux yang baru di-
+      # `npm ci` di dalam container saat build, dan native addon-nya
+      # akan CRASH (binary utk OS yang salah).
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   rbac_pgdata:
   rbac_redisdata:
+  rbac_lokidata:
+  rbac_grafanadata:

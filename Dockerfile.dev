@@ -1,0 +1,24 @@
+# DEV-ONLY -- HANYA dipakai service `app` di docker-compose.yml
+# (profile `full`) untuk keperluan demo/verifikasi pipeline
+# observability (Loki/Alloy/Grafana). BUKAN Dockerfile production
+# (itu item roadmap terpisah: "Dockerfile production (multi-stage
+# build)" -- akan jauh lebih ramping: multi-stage, tanpa devDependencies,
+# non-root user, dst).
+#
+# Workflow dev harian TETAP `npm run start:dev` langsung di host --
+# hot-reload jauh lebih cepat tanpa lapisan container, dan native
+# addon (argon2, sharp) tidak perlu di-compile ulang tiap kali image
+# di-build.
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Layer terpisah dari `COPY . .` di bawah -- Docker cuma re-run `npm ci`
+# kalau package.json/package-lock.json berubah, bukan tiap kali ada
+# perubahan source code (cache layer Docker).
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+CMD ["npm", "run", "start:dev"]

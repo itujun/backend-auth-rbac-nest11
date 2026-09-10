@@ -1,0 +1,19 @@
+# PALING PENTING: tanpa ini, `COPY . .` di Dockerfile.dev akan
+# menyalin .env (berisi JWT secret, dst) LANGSUNG ke dalam layer image
+# Docker -- bahkan kalau file itu dihapus di layer sesudahnya, tetap
+# bisa diekstrak dari image history. Kredensial yang sudah masuk image
+# HARUS dianggap bocor secara permanen.
+.env
+.env.*.local
+
+node_modules
+dist
+coverage
+test-uploads
+uploads
+
+.git
+.vscode
+
+*.log
+npm-debug.log*

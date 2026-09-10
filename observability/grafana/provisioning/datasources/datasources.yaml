@@ -1,0 +1,18 @@
+# Provisioning otomatis -- Grafana baca file ini saat startup dan
+# langsung punya datasource Loki terpasang, TANPA perlu klik-klik
+# manual "Add data source" tiap kali container Grafana di-recreate
+# (mis. setelah `docker compose down -v` bikin volume Grafana kehapus).
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    # "loki" di sini adalah NAMA SERVICE di docker-compose.yml, bukan
+    # localhost -- Grafana & Loki bicara lewat jaringan internal Docker
+    # Compose, bukan lewat port yang di-expose ke host.
+    url: http://loki:3100
+    isDefault: true
+    jsonData:
+      maxLines: 1000
+    editable: false

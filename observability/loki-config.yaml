@@ -1,0 +1,50 @@
+# Config MINIMAL untuk Loki mode "single binary" (semua komponen jadi
+# satu proses) -- cocok untuk dev lokal/project kecil seperti ini.
+# BUKAN config untuk production skala besar (itu butuh mode
+# microservices + object storage seperti S3/GCS, bukan filesystem
+# lokal seperti di sini).
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# TSDB + schema v13 adalah default yang direkomendasikan Loki 3.x --
+# index berbasis label (bukan full-text), inilah yang bikin Loki jauh
+# lebih ringan dibanding Elasticsearch untuk kasus log terstruktur
+# seperti JSON dari pino.
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Retensi 7 hari cukup untuk kebutuhan dev/demo tanpa bikin volume
+  # Docker (`rbac_lokidata`) membengkak tanpa batas waktu. Di
+  # production, sesuaikan dengan kebutuhan retensi/audit masing-masing
+  # (beberapa industri mewajibkan retensi jauh lebih panjang).
+  retention_period: 168h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem

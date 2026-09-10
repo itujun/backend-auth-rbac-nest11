@@ -779,6 +779,36 @@ curl -X POST http://localhost:3000/api/permissions \
         dokumentasi OpenAPI, dependency lama dihapus.
   - [x] Security hardening — Helmet (header keamanan, CSP dimatikan khusus saat Swagger aktif, CORP `cross-origin` untuk avatar), rate limiting global via `@nestjs/throttler` + limit lebih ketat khusus di `/auth/register`, `/auth/login`, `/auth/refresh`. Cookie flags (httpOnly/secure/sameSite) sudah benar sejak awal (lihat `RefreshCookieHelper`).
   - [x] Structured logging (`nestjs-pino`) — JSON di production, pretty-print berwarna di development (`LOG_LEVEL`/`LOG_PRETTY`), redact otomatis header `Authorization`/`Cookie`/`Set-Cookie`, level log mengikuti status HTTP (4xx→warn, 5xx→error), health check dikecualikan dari auto-log biar tidak jadi noise.
+  - [x] Centralized logging (Grafana Loki + Alloy + Grafana) —
+        `docker compose up -d` sekarang juga menjalankan `loki`, `alloy`,
+        `grafana` selain `postgres`/`redis`. Alloy tarik log SEMUA
+        container milik project ini (difilter via label
+        `com.docker.compose.project`, lihat `name: rbac-backend` di
+        `docker-compose.yml`) lewat Docker socket, kirim ke Loki. Cuma
+        field `level` yang dipromosikan jadi LABEL Loki (cardinality
+        rendah, ~6 nilai tetap) — field lain (`reqId`, `userId`, `msg`)
+        SENGAJA dibiarkan di isi log, dicari lewat `| json` saat query,
+        bukan di-index permanen (index label ber-cardinality tinggi =
+        "cardinality explosion", kesalahan umum pemula Loki).
+        Grafana: **http://localhost:3300** (BUKAN 3000 — itu port host
+        untuk app sendiri), login admin otomatis (anonymous auth,
+        HANYA untuk dev lokal), datasource Loki sudah ter-provisioning
+        otomatis (tidak perlu setup manual).
+
+        **Kalau mau lihat log app KAMU SENDIRI di Grafana** (bukan
+            cuma Postgres/Redis): app yang jalan host-mode
+            (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
+            cuma bisa lihat container Docker). Matikan dulu
+            `npm run start:dev`, lalu:
+            `docker compose --profile full up -d --build app` — ini
+            menjalankan app di container dev (`Dockerfile.dev`, BUKAN
+            Dockerfile production — itu roadmap terpisah) khusus untuk
+            keperluan demo/verifikasi pipeline observability ini.
+
+            Contoh query LogQL di Grafana Explore:
+            `{container="rbac_app"} | json | level="error"` (semua error
+            dari app).
+
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [x] Redis caching (permission checks) — cache-aside pada
         `AuthorizationService` via `PermissionsCacheService` (key
