@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AuthorizationRepository } from './authorization.repository';
 import { AuthorizationService } from './authorization.service';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
+import { PermissionsCacheService } from './permissions-cache.service';
 
 /**
  * @Global() supaya AuthorizationService bisa dipakai PermissionsGuard
@@ -22,6 +23,6 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
       useClass: PermissionsGuard,
     },
   ],
-  exports: [AuthorizationService],
+  exports: [AuthorizationService, PermissionsCacheService],
 })
 export class AuthorizationModule {}
