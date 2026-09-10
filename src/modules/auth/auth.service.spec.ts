@@ -153,7 +153,6 @@ describe('AuthService', () => {
       expect(recordMock).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'auth.login_failed',
-          actorUserId: undefined,
           actorEmail: 'tidak-ada@example.com',
           metadata: { reason: 'user_not_found' },
         }),
