@@ -65,6 +65,11 @@ async function bootstrap() {
   app.enableCors({
     origin: configService.get<string>('app.corsOrigin'),
     credentials: true, // wajib untuk kirim/terima httpOnly cookie (refresh token)
+    // Tanpa ini, browser DIAM-DIAM MENYEMBUNYIKAN header `X-Request-Id`
+    // dari `fetch()`/`XMLHttpRequest` di frontend (default CORS cuma
+    // izinkan segelintir response header "aman" dibaca JS lintas-origin).
+    // Lihat genReqId di logger.config.ts untuk asal header ini.
+    exposedHeaders: ['X-Request-Id'],
   });
 
   // Serve folder upload (avatar, dsb) sebagai static file di /uploads/*.
