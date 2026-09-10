@@ -12,31 +12,37 @@ repository pattern, dan standard API response.
 - **API Docs**: Swagger/OpenAPI (`@nestjs/swagger`) di `/api/docs`
 - **Logging**: `nestjs-pino` (JSON terstruktur di production, pretty-print di development)
 - **Health Check**: `@nestjs/terminus` di `/api/health` (custom indicator untuk Drizzle)
+- **Audit Log**: tabel `audit_logs` sendiri (bukan cuma application log) — mencatat event bisnis penting (login, CRUD role/permission, avatar), queryable lewat `GET /audit-logs`
 - **Frontend**: Svelte (simulasi UI untuk testing fitur backend)
 
 ## Cara Menjalankan (Development)
 
 1. **Copy env**
+
    ```bash
    cp .env.example .env
    ```
 
 2. **Jalankan PostgreSQL via Docker Compose**
+
    ```bash
    docker compose up -d
    ```
 
 3. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 4. **Jalankan migration**
+
    ```bash
    npm run db:migrate
    ```
 
 5. **Jalankan server**
+
    ```bash
    npm run start:dev
    ```
@@ -50,6 +56,7 @@ Buka **`http://localhost:3000/api/docs`** untuk dokumentasi interaktif
 seluruh endpoint.
 
 Cara coba endpoint yang butuh login lewat Swagger UI:
+
 1. Jalankan `POST /auth/register`, lalu `POST /auth/login` langsung dari
    Swagger UI.
 2. Salin `accessToken` dari response `login`.
@@ -94,6 +101,7 @@ package yang belum ter-install (dianggap `any`, lalu ditangkap rule
 default, keduanya karena app ini sengaja cross-origin (frontend terpisah,
 avatar disajikan sebagai static file) — detail lengkap ada di komentar
 `main.ts`:
+
 - `contentSecurityPolicy` dimatikan HANYA saat Swagger aktif (CSP default
   akan bikin halaman `/api/docs` blank).
 - `crossOriginResourcePolicy` di-set `cross-origin` supaya frontend di
@@ -101,11 +109,12 @@ avatar disajikan sebagai static file) — detail lengkap ada di komentar
   `/uploads/...`.
 
 **Rate limiting** (`@nestjs/throttler`) — dua lapis:
+
 1. Global: `THROTTLE_LIMIT` request per `THROTTLE_TTL_MS` per IP (default
    100 req/menit), berlaku ke semua endpoint.
 2. Lebih ketat khusus endpoint rawan brute-force/credential-stuffing:
    `POST /auth/register` & `POST /auth/login` (5/menit), `POST
-   /auth/refresh` (10/menit) — di-set langsung lewat `@Throttle()` di
+/auth/refresh` (10/menit) — di-set langsung lewat `@Throttle()` di
    `auth.controller.ts` (lihat komentar di sana kenapa ini tidak lewat
    env seperti limit global).
 
@@ -173,6 +182,7 @@ secara transparan).
   dipertahankan seperti sebelumnya.
 
 **Bug dorman yang ditemukan & dibenahi saat mengerjakan ini:**
+
 1. `DatabaseModule.onModuleDestroy()` sudah ada sejak awal tapi **tidak
    pernah benar-benar terpanggil** — NestJS tidak menjalankan lifecycle
    shutdown hook saat menerima SIGTERM/SIGINT kecuali
@@ -183,17 +193,69 @@ secara transparan).
 2. `AllExceptionsFilter` diam-diam membuang detail error kalau body
    exception bukan bentuk `{ message: string }` standar NestJS — persis
    kasus `HealthCheckResult` dari Terminus saat gagal (`{status, info,
-   error, details}`, tanpa field `message` sama sekali). Sekarang body
+error, details}`, tanpa field `message` sama sekali). Sekarang body
    apa adanya di-fallback ke `errors` supaya detail tidak hilang.
+
+## Audit Log
+
+Beda dari **Logging** (`nestjs-pino`, di atas) yang mencatat _setiap
+request HTTP_ untuk kebutuhan operasional (debugging, monitoring) dan
+disimpan sebagai log file/stdout — **Audit Log** mencatat _event bisnis
+tertentu yang bermakna_ (siapa melakukan apa, ke resource mana, kapan)
+secara permanen di tabel `audit_logs`, untuk kebutuhan forensik &
+kepatuhan. Dua hal ini sengaja dipisah, bukan duplikat.
+
+**Event yang tercatat saat ini:**
+
+| Action                                    | Actor                        | Catatan                                                                                                                                                                     |
+| ----------------------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auth.register`                           | User baru                    |                                                                                                                                                                             |
+| `auth.login_success`                      | User yang login              |                                                                                                                                                                             |
+| `auth.login_failed`                       | User (kalau ketemu) / `null` | `metadata.reason`: `user_not_found` \| `account_inactive` \| `invalid_password`. Email yang **dicoba** tetap dicatat walau usernya tidak ada — berguna deteksi brute-force. |
+| `auth.logout` / `auth.logout_all`         | User yang logout             |                                                                                                                                                                             |
+| `role.create` / `update` / `delete`       | Admin pelaku                 | `role.delete` menyimpan nama role di metadata SEBELUM baris DB-nya hilang                                                                                                   |
+| `role.assign_user` / `revoke_user`        | Admin pelaku                 | resourceId gabungan `"roleId:userId"`                                                                                                                                       |
+| `role.sync_permissions`                   | Admin pelaku                 | metadata: daftar permissionId baru                                                                                                                                          |
+| `permission.create` / `update` / `delete` | Admin pelaku                 |                                                                                                                                                                             |
+| `profile.avatar_update` / `avatar_reset`  | User itu sendiri             | Selalu self-service, tidak ada actor terpisah                                                                                                                               |
+
+**Desain penting:**
+
+- `AuditLogService.record()` **best-effort** — kalau penulisan log gagal
+  (mis. DB sesaat bermasalah), itu TIDAK BOLEH menggagalkan operasi
+  bisnis yang sudah sukses. Error-nya cuma di-log lewat pino, tidak
+  pernah di-`throw` ulang ke pemanggil.
+- `action` disimpan sebagai `varchar` bebas (bukan enum Postgres) supaya
+  menambah jenis event baru tidak perlu migration `ALTER TYPE` — tapi di
+  sisi aplikasi tetap type-safe lewat union string literal `AuditAction`
+  (typo ketahuan saat compile).
+- `actorEmail` disimpan sebagai **snapshot**, terpisah dari relasi
+  `actorUserId` — kalau user-nya nanti dihapus atau ganti email, baris
+  audit lama tetap terbaca "siapa" pelakunya. `actorUserId` sendiri
+  `onDelete: 'set null'` (bukan `cascade`) dengan alasan yang sama:
+  riwayat audit harus tetap ada walau user-nya dihapus.
+- Dua "jenis" actor yang berbeda konsep: di event **auth**, actor =
+  subjek event itu sendiri (`AuthService` langsung tahu `user.id`). Di
+  **CRUD role/permission**, actor = **admin yang melakukan** aksi
+  terhadap resource lain, jadi harus di-thread eksplisit dari
+  `@CurrentUser()` di controller sampai ke service (lihat parameter
+  `actor: AuditActor` di `RolesService`/`PermissionsService`).
+
+**Endpoint admin:** `GET /audit-logs` (butuh permission `audit-log:read`
+— buat & assign permission ini seperti biasa lewat `POST /permissions`
+
+- `PUT /roles/:id/permissions`). Filter: `actorUserId`, `action` (exact
+  match), `resourceType`. Sort cuma `createdAt` (audit log dibaca
+  kronologis, beda dari resource lain yang wajar di-sort per nama).
 
 ## Script Database (Drizzle Kit)
 
-| Script              | Fungsi                                                        |
-| -------------------- | --------------------------------------------------------------- |
-| `npm run db:generate` | Generate file migration SQL baru dari perubahan schema         |
-| `npm run db:migrate`  | Terapkan migration yang belum berjalan ke database              |
+| Script                | Fungsi                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `npm run db:generate` | Generate file migration SQL baru dari perubahan schema                                           |
+| `npm run db:migrate`  | Terapkan migration yang belum berjalan ke database                                               |
 | `npm run db:push`     | Push schema langsung ke DB tanpa file migration (khusus prototyping cepat, hindari di kerja tim) |
-| `npm run db:studio`   | Buka Drizzle Studio (GUI browser untuk lihat isi database)       |
+| `npm run db:studio`   | Buka Drizzle Studio (GUI browser untuk lihat isi database)                                       |
 
 ## Arsitektur
 
@@ -212,7 +274,7 @@ src/
     schema/        # Definisi tabel Drizzle (source of truth struktur DB)
     migrations/    # File migration SQL yang di-generate dari schema
     database.module.ts  # Provider koneksi Postgres (PG_POOL) + instance Drizzle (global)
-  modules/         # Feature module: auth, users, profiles, roles, permissions, health
+  modules/         # Feature module: auth, users, profiles, roles, permissions, health, audit-log
 ```
 
 ### Kenapa strukturnya begini?
@@ -351,6 +413,7 @@ yang sepenuhnya dikontrol attacker. Validasi yang benar harus membaca
 **isi file sesungguhnya**.
 
 **Fix** di `AvatarStorageService.saveAvatar()`:
+
 1. Cek `mimetype` klaim client tetap dipertahankan sebagai fast-fail
    murah (menolak kesalahan jujur lebih awal dengan pesan jelas).
 2. Ditambah verifikasi SESUNGGUHNYA: `sharp(buffer).metadata()` membaca
@@ -415,15 +478,15 @@ itu juga ESM-only — tinggal tambahkan namanya ke pattern
 
 ## API Endpoints (Phase 1 + 2)
 
-| Method | Endpoint               | Auth?     | Deskripsi                                |
-| ------ | ----------------------- | --------- | ------------------------------------------ |
-| GET    | `/api/health`            | Public    | Health check                               |
-| POST   | `/api/auth/register`     | Public    | Registrasi user baru + auto-create profile |
-| POST   | `/api/auth/login`        | Public    | Login → `accessToken` di body, `refresh_token` di httpOnly cookie |
-| POST   | `/api/auth/refresh`      | Public*   | Tukar refresh token (cookie) dengan access token + refresh token baru (rotasi) |
-| POST   | `/api/auth/logout`       | Public*   | Revoke sesi saat ini (device ini saja)     |
-| POST   | `/api/auth/logout-all`   | Protected | Revoke SEMUA sesi milik user (butuh access token) |
-| GET    | `/api/auth/me`           | Protected | Data user yang sedang login                |
+| Method | Endpoint               | Auth?     | Deskripsi                                                                      |
+| ------ | ---------------------- | --------- | ------------------------------------------------------------------------------ |
+| GET    | `/api/health`          | Public    | Health check                                                                   |
+| POST   | `/api/auth/register`   | Public    | Registrasi user baru + auto-create profile                                     |
+| POST   | `/api/auth/login`      | Public    | Login → `accessToken` di body, `refresh_token` di httpOnly cookie              |
+| POST   | `/api/auth/refresh`    | Public*   | Tukar refresh token (cookie) dengan access token + refresh token baru (rotasi) |
+| POST   | `/api/auth/logout`     | Public*   | Revoke sesi saat ini (device ini saja)                                         |
+| POST   | `/api/auth/logout-all` | Protected | Revoke SEMUA sesi milik user (butuh access token)                              |
+| GET    | `/api/auth/me`         | Protected | Data user yang sedang login                                                    |
 
 \* `refresh` dan `logout` tidak butuh `Authorization` header (bukan
 dilindungi JWT guard), tapi tetap butuh refresh token cookie yang valid
@@ -431,6 +494,7 @@ untuk berfungsi — beda mekanisme autentikasi, bukan berarti "tanpa
 autentikasi sama sekali".
 
 Contoh:
+
 ```bash
 # Login — simpan cookie ke jar (butuh -c saat login, -b saat request selanjutnya)
 curl -c cookies.txt -X POST http://localhost:3000/api/auth/login \
@@ -460,28 +524,28 @@ Semua endpoint di bawah ini butuh `Authorization: Bearer <accessToken>`
 
 ### Permissions
 
-| Method | Endpoint                | Permission          | Deskripsi                  |
-| ------ | ------------------------ | -------------------- | ---------------------------- |
-| GET    | `/api/permissions`        | `permission:read`    | Daftar semua permission      |
-| GET    | `/api/permissions/:id`    | `permission:read`    | Detail satu permission       |
-| POST   | `/api/permissions`        | `permission:create`  | Buat permission baru         |
-| PATCH  | `/api/permissions/:id`    | `permission:update`  | Ubah permission              |
-| DELETE | `/api/permissions/:id`    | `permission:delete`  | Hapus permission             |
+| Method | Endpoint               | Permission          | Deskripsi               |
+| ------ | ---------------------- | ------------------- | ----------------------- |
+| GET    | `/api/permissions`     | `permission:read`   | Daftar semua permission |
+| GET    | `/api/permissions/:id` | `permission:read`   | Detail satu permission  |
+| POST   | `/api/permissions`     | `permission:create` | Buat permission baru    |
+| PATCH  | `/api/permissions/:id` | `permission:update` | Ubah permission         |
+| DELETE | `/api/permissions/:id` | `permission:delete` | Hapus permission        |
 
 ### Roles
 
-| Method | Endpoint                          | Permission               | Deskripsi                              |
-| ------ | ----------------------------------- | -------------------------- | ----------------------------------------- |
-| GET    | `/api/roles`                        | `role:read`                 | Daftar semua role                        |
-| GET    | `/api/roles/:id`                    | `role:read`                 | Detail satu role                         |
-| POST   | `/api/roles`                        | `role:create`                | Buat role baru                           |
-| PATCH  | `/api/roles/:id`                    | `role:update`                | Ubah role (nama/deskripsi)               |
-| DELETE | `/api/roles/:id`                    | `role:delete`                | Hapus role (cascade ke assignment-nya)   |
-| GET    | `/api/roles/:id/permissions`        | `role:read`                 | Daftar permission milik role ini         |
-| PUT    | `/api/roles/:id/permissions`        | `role:manage-permissions`    | Ganti SELURUH daftar permission role ini (`{"permissionIds":[1,2,3]}`) |
-| GET    | `/api/roles/:id/users`              | `role:read`                 | Daftar user pemilik role ini             |
-| POST   | `/api/roles/:id/users/:userId`      | `role:manage-users`          | Assign role ke user                      |
-| DELETE | `/api/roles/:id/users/:userId`      | `role:manage-users`          | Cabut role dari user                     |
+| Method | Endpoint                       | Permission                | Deskripsi                                                              |
+| ------ | ------------------------------ | ------------------------- | ---------------------------------------------------------------------- |
+| GET    | `/api/roles`                   | `role:read`               | Daftar semua role                                                      |
+| GET    | `/api/roles/:id`               | `role:read`               | Detail satu role                                                       |
+| POST   | `/api/roles`                   | `role:create`             | Buat role baru                                                         |
+| PATCH  | `/api/roles/:id`               | `role:update`             | Ubah role (nama/deskripsi)                                             |
+| DELETE | `/api/roles/:id`               | `role:delete`             | Hapus role (cascade ke assignment-nya)                                 |
+| GET    | `/api/roles/:id/permissions`   | `role:read`               | Daftar permission milik role ini                                       |
+| PUT    | `/api/roles/:id/permissions`   | `role:manage-permissions` | Ganti SELURUH daftar permission role ini (`{"permissionIds":[1,2,3]}`) |
+| GET    | `/api/roles/:id/users`         | `role:read`               | Daftar user pemilik role ini                                           |
+| POST   | `/api/roles/:id/users/:userId` | `role:manage-users`       | Assign role ke user                                                    |
+| DELETE | `/api/roles/:id/users/:userId` | `role:manage-users`       | Cabut role dari user                                                   |
 
 ### Bootstrap RBAC (wajib dilakukan sekali di awal)
 
@@ -505,6 +569,7 @@ curl -X POST http://localhost:3000/api/auth/login \
 ```
 
 Contoh alur assign role custom ke user lain:
+
 ```bash
 # Buat role baru
 curl -X POST http://localhost:3000/api/roles \
@@ -530,25 +595,26 @@ strukturnya begini?").
 
 ### Self-service (semua user login, tanpa permission khusus)
 
-| Method | Endpoint                  | Deskripsi                                  |
-| ------ | --------------------------- | --------------------------------------------- |
-| GET    | `/api/profile/me`            | Lihat profile milik sendiri                  |
-| PATCH  | `/api/profile/me`            | Update `fullName`/`phone`/`bio` milik sendiri |
-| POST   | `/api/profile/me/avatar`     | Upload avatar (multipart, field `avatar`)    |
-| DELETE | `/api/profile/me/avatar`     | Reset avatar ke default                      |
+| Method | Endpoint                 | Deskripsi                                     |
+| ------ | ------------------------ | --------------------------------------------- |
+| GET    | `/api/profile/me`        | Lihat profile milik sendiri                   |
+| PATCH  | `/api/profile/me`        | Update `fullName`/`phone`/`bio` milik sendiri |
+| POST   | `/api/profile/me/avatar` | Upload avatar (multipart, field `avatar`)     |
+| DELETE | `/api/profile/me/avatar` | Reset avatar ke default                       |
 
 ### Admin (butuh permission)
 
-| Method | Endpoint                  | Permission        | Deskripsi                       |
-| ------ | --------------------------- | -------------------- | ----------------------------------- |
-| GET    | `/api/profiles/:userId`      | `profile:read`        | Lihat profile user manapun         |
-| PATCH  | `/api/profiles/:userId`      | `profile:update`      | Ubah profile user manapun (tanpa avatar) |
+| Method | Endpoint                | Permission       | Deskripsi                                |
+| ------ | ----------------------- | ---------------- | ---------------------------------------- |
+| GET    | `/api/profiles/:userId` | `profile:read`   | Lihat profile user manapun               |
+| PATCH  | `/api/profiles/:userId` | `profile:update` | Ubah profile user manapun (tanpa avatar) |
 
 Batasan upload: maksimal 5MB, format JPEG/PNG/WebP saja (ditolak `415`
 kalau format lain). Hasil akhir SELALU WebP 512×512 apapun format/ukuran
 aslinya.
 
 Contoh:
+
 ```bash
 # Lihat profile sendiri
 curl http://localhost:3000/api/profile/me -H "Authorization: Bearer <accessToken>"
@@ -576,31 +642,32 @@ curl http://localhost:3000/uploads/avatars/user-3-xxxx.webp -o avatar.webp
 Semua endpoint list (`GET /users`, `GET /roles`, `GET /permissions`)
 menerima query parameter berikut:
 
-| Param       | Tipe               | Default      | Keterangan                                     |
-| ----------- | -------------------- | -------------- | ------------------------------------------------- |
-| `page`      | integer (≥1)          | `1`            | Halaman ke berapa                                 |
-| `limit`     | integer (1–100)       | `10`           | Jumlah item per halaman (dibatasi maks. 100)      |
-| `search`    | string                | -              | Pencarian bebas (`ILIKE`, case-insensitive)       |
-| `sortBy`    | enum (beda per resource) | beda per resource | Kolom sort — divalidasi lewat whitelist            |
-| `sortOrder` | `asc` \| `desc`       | beda per resource | Arah sort                                         |
+| Param       | Tipe                     | Default           | Keterangan                                   |
+| ----------- | ------------------------ | ----------------- | -------------------------------------------- |
+| `page`      | integer (≥1)             | `1`               | Halaman ke berapa                            |
+| `limit`     | integer (1–100)          | `10`              | Jumlah item per halaman (dibatasi maks. 100) |
+| `search`    | string                   | -                 | Pencarian bebas (`ILIKE`, case-insensitive)  |
+| `sortBy`    | enum (beda per resource) | beda per resource | Kolom sort — divalidasi lewat whitelist      |
+| `sortOrder` | `asc` \| `desc`          | beda per resource | Arah sort                                    |
 
 Kolom yang bisa di-`search`/`sortBy` per resource:
 
-| Resource      | `search` mencocokkan | `sortBy` yang diizinkan   |
-| ------------- | ----------------------- | ---------------------------- |
-| `/users`      | `email`                  | `email`, `createdAt`         |
-| `/roles`      | `name`, `description`    | `name`, `createdAt`          |
-| `/permissions`| `name`, `description`    | `name`, `createdAt`          |
+| Resource       | `search` mencocokkan  | `sortBy` yang diizinkan |
+| -------------- | --------------------- | ----------------------- |
+| `/users`       | `email`               | `email`, `createdAt`    |
+| `/roles`       | `name`, `description` | `name`, `createdAt`     |
+| `/permissions` | `name`, `description` | `name`, `createdAt`     |
 
 `GET /users` juga menerima filter tambahan `isActive=true|false`.
 
 Response list SELALU membawa `meta` di level atas:
+
 ```json
 {
   "success": true,
   "statusCode": 200,
   "message": "Daftar user berhasil diambil",
-  "data": [ /* array item */ ],
+  "data": [/* array item */],
   "meta": { "page": 1, "limit": 10, "totalItems": 42, "totalPages": 5 },
   "timestamp": "...",
   "path": "/api/users"
@@ -608,6 +675,7 @@ Response list SELALU membawa `meta` di level atas:
 ```
 
 Contoh:
+
 ```bash
 # Halaman 2, 20 item per halaman
 curl "http://localhost:3000/api/users?page=2&limit=20" -H "Authorization: Bearer <accessToken>"
@@ -627,6 +695,44 @@ curl "http://localhost:3000/api/permissions?search=role" -H "Authorization: Bear
 `superadmin` lewat seed script — jalankan ulang `npm run db:seed`
 kalau superadmin kamu dibuat sebelum Phase 5 supaya permission baru
 ini ikut ter-assign).
+
+## API Endpoints (Phase 6 — Audit Log)
+
+`GET /audit-logs` — beda dari endpoint list lain, TIDAK punya `search`
+bebas, cuma filter exact-match:
+
+| Param          | Tipe                                           | Keterangan                                     |
+| -------------- | ---------------------------------------------- | ---------------------------------------------- |
+| `actorUserId`  | integer                                        | Filter exact match berdasarkan id pelaku       |
+| `action`       | string                                         | Filter exact match, contoh `auth.login_failed` |
+| `resourceType` | string                                         | Filter exact match, contoh `role`              |
+| `sortBy`       | `createdAt` (satu-satunya pilihan)             |                                                |
+| `sortOrder`    | `asc` \| `desc`, default `desc` (terbaru dulu) |                                                |
+
+`page`/`limit` sama seperti endpoint list lainnya.
+
+Contoh:
+
+```bash
+# 20 audit log terbaru
+curl "http://localhost:3000/api/audit-logs?limit=20" -H "Authorization: Bearer <accessToken>"
+
+# Semua percobaan login gagal
+curl "http://localhost:3000/api/audit-logs?action=auth.login_failed" -H "Authorization: Bearer <accessToken>"
+
+# Semua aktivitas 1 user tertentu
+curl "http://localhost:3000/api/audit-logs?actorUserId=7" -H "Authorization: Bearer <accessToken>"
+```
+
+Butuh permission `audit-log:read` — permission ini BARU, belum otomatis
+ter-assign ke role manapun lewat seed script lama. Buat & assign manual:
+
+```bash
+curl -X POST http://localhost:3000/api/permissions \
+  -H "Authorization: Bearer <accessToken>" -H "Content-Type: application/json" \
+  -d '{"name":"audit-log:read","description":"Lihat audit log"}'
+# lalu PUT /roles/:id/permissions untuk assign ke role superadmin
+```
 
 ## Progress Roadmap
 
@@ -653,8 +759,7 @@ ini ikut ter-assign).
       sharp), cleanup file lama otomatis, default avatar dibundel &
       di-copy saat first boot, static file serving di `/uploads/*`.
 - [x] **Phase 5 — List Features**
-      Pagination + search + sort + filter reusable (`PaginationQueryDto`
-      + helper `paginate()`) dipasang di `GET /users` (endpoint baru),
+      Pagination + search + sort + filter reusable (`PaginationQueryDto` + helper `paginate()`) dipasang di `GET /users` (endpoint baru),
       `GET /roles`, `GET /permissions`. Whitelist kolom sort per
       resource, filter `isActive` khusus users, terhubung otomatis ke
       `meta` di response envelope lewat `PaginatedResult<T>`.
@@ -675,8 +780,23 @@ ini ikut ter-assign).
   - [x] Security hardening — Helmet (header keamanan, CSP dimatikan khusus saat Swagger aktif, CORP `cross-origin` untuk avatar), rate limiting global via `@nestjs/throttler` + limit lebih ketat khusus di `/auth/register`, `/auth/login`, `/auth/refresh`. Cookie flags (httpOnly/secure/sameSite) sudah benar sejak awal (lihat `RefreshCookieHelper`).
   - [x] Structured logging (`nestjs-pino`) — JSON di production, pretty-print berwarna di development (`LOG_LEVEL`/`LOG_PRETTY`), redact otomatis header `Authorization`/`Cookie`/`Set-Cookie`, level log mengikuti status HTTP (4xx→warn, 5xx→error), health check dikecualikan dari auto-log biar tidak jadi noise.
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
-  - [ ] Testing (unit per modul + e2e untuk alur auth & RBAC)
-  - [ ] Audit log module (login attempt, CRUD role/permission/profile)
+  - [~] Testing — **unit test SELESAI** (~140 test: util murni, guards,
+    filter/interceptor, `AuthService`, `RefreshTokensService`,
+    `UsersService`, `ProfilesService`, `AvatarStorageService`,
+    `RolesService`, `PermissionsService`). **E2E test DIJEDA** —
+    infra bootstrap, alur auth, RBAC, dan update README terkait
+    belum dikerjakan. Lanjutkan ini sebelum deploy ke production.
+  - [x] Audit log module — tabel `audit_logs` (actor + snapshot email,
+        action bebas non-enum, resource, metadata jsonb, index
+        `actorUserId`/`createdAt`), `AuditLogService.record()`
+        best-effort (gagal nulis log TIDAK menggagalkan operasi
+        bisnis), terintegrasi di: `AuthService` (register, login
+        sukses/gagal dgn alasan, logout, logout-all), `RolesService` +
+        `PermissionsService` (CRUD + assign/revoke/sync — actor = admin
+        yang melakukan, bukan resource-nya), `ProfilesService` (avatar
+        update/reset — self-service, tanpa actor terpisah). Endpoint
+        admin `GET /audit-logs` (pagination + filter actorUserId/
+        action/resourceType, permission baru `audit-log:read`).
   - [ ] CI pipeline (GitHub Actions: lint → test → build)
   - [ ] Dockerfile production (multi-stage build)
 - [ ] **Phase 7 — Frontend Svelte** (simulasi UI untuk testing manual seluruh fitur backend)
