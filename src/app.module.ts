@@ -15,6 +15,7 @@ import { AuthorizationModule } from './core/authorization/authorization.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
+import { RedisModule } from './core/redis/redis.module';
 
 @Module({
   imports: [
@@ -53,6 +54,13 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
       }),
     }),
     DatabaseModule,
+    // Didaftarkan SEBELUM HealthModule -- HealthController butuh
+    // RedisHealthIndicator, dan RedisHealthIndicator butuh REDIS_CLIENT
+    // sudah ter-provide. Sama seperti DatabaseModule di atas, urutan ini
+    // sebenarnya tidak WAJIB secara teknis (keduanya @Global()), tapi
+    // dipertahankan biar predictable & konsisten dengan alasan urutan
+    // AuthModule/AuthorizationModule di bawah.
+    RedisModule,
     HealthModule,
     AuditLogModule,
     // URUTAN IMPORT INI PENTING: NestJS menjalankan beberapa provider

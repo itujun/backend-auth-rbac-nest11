@@ -28,6 +28,17 @@ export const envValidationSchema = Joi.object({
   // Storage (upload avatar)
   UPLOAD_DIR: Joi.string().default('uploads'),
 
+  // Redis (cache-aside untuk permission checks, lihat AuthorizationService).
+  // Semua opsional dengan default -- SENGAJA tidak `.required()`, karena
+  // Redis di project ini murni optimasi, bukan dependency wajib untuk
+  // aplikasi bisa hidup (beda filosofi dengan DATABASE_URL di atas).
+  REDIS_HOST: Joi.string().default('localhost'),
+  REDIS_PORT: Joi.number().port().default(6379),
+  REDIS_PASSWORD: Joi.string().allow('').optional(),
+  REDIS_DB: Joi.number().integer().min(0).max(15).default(0),
+  REDIS_KEY_PREFIX: Joi.string().default('rbac:'),
+  REDIS_PERMISSIONS_TTL_SECONDS: Joi.number().integer().positive().default(300),
+
   // CORS
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
 

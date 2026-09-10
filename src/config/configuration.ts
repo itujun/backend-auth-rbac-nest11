@@ -31,6 +31,29 @@ export default () => ({
   storage: {
     uploadDir: process.env.UPLOAD_DIR ?? 'uploads',
   },
+  redis: {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+    // Kosong = tanpa auth, cocok untuk docker-compose.yml dev saat ini
+    // (image `redis:7-alpine` tanpa `--requirepass`). Kalau nanti
+    // deploy ke managed Redis (mis. Upstash/ElastiCache) yang mewajibkan
+    // auth, tinggal isi env ini tanpa ubah kode.
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB ?? '0', 10),
+    // Prefix semua key yang ditulis lewat REDIS_CLIENT ini -- berguna
+    // kalau Redis instance yang sama nanti dipakai bareng aplikasi lain
+    // (shared Redis di lingkungan yang lebih hemat biaya), supaya key
+    // tidak saling tabrak/collide.
+    keyPrefix: process.env.REDIS_KEY_PREFIX ?? 'rbac:',
+    // TTL default (detik) untuk entry cache permission -- jaring
+    // pengaman kalau ada invalidation yang terlewat (lihat pembahasan
+    // di AuthorizationService, Phase 6b). Invalidation eksplisit tetap
+    // mekanisme UTAMA; TTL ini cuma cadangan.
+    permissionsTtlSeconds: parseInt(
+      process.env.REDIS_PERMISSIONS_TTL_SECONDS ?? '300',
+      10,
+    ),
+  },
   throttle: {
     // Default global — endpoint sensitif (login/register/refresh) override
     // sendiri lewat @Throttle() langsung di controller (lihat komentar di

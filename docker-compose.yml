@@ -17,5 +17,33 @@ services:
       timeout: 5s
       retries: 5
 
+  # Sengaja PIN ke major version + varian alpine, BUKAN `redis:latest`.
+  # `latest` adalah moving target -- image bisa berubah versi tanpa
+  # disadari tiap kali di-pull ulang (mesin lain, CI, atau rebuild),
+  # merusak reproducibility yang sudah dijaga konsisten oleh service
+  # `postgres` di atas (yang juga di-pin `16-alpine`, bukan `latest`).
+  redis:
+    image: redis:7-alpine
+    container_name: rbac_redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - rbac_redisdata:/data
+    # --appendonly yes: aktifkan AOF persistence. Redis di project ini
+    # cuma cache-aside (bukan source of truth -- lihat komentar di
+    # RedisModule), jadi persistence sebenarnya tidak wajib secara
+    # korekt. Tapi tetap diaktifkan supaya restart container dev tidak
+    # bikin cache kosong total lalu semua request pertama sesudahnya
+    # jadi "thundering herd" ke Postgres sekaligus. Trade-off kecil:
+    # sedikit overhead disk I/O, sepadan untuk kebutuhan dev.
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   rbac_pgdata:
+  rbac_redisdata:
