@@ -70,6 +70,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # Masa tenggang sebelum kegagalan healthcheck mulai dihitung.
+      # Tanpa ini, saat banyak container cold-start bersamaan (CPU/disk
+      # kontensi tinggi), Loki bisa dianggap "belum sehat" tepat di
+      # momen alloy/grafana coba start (keduanya depends_on
+      # service_healthy), padahal Loki cuma butuh beberapa detik lagi.
+      # Sudah pernah terjadi persis begini saat live-testing: alloy &
+      # grafana gagal start bareng grup, harus di-start manual satu-
+      # satu setelah Loki keburu sehat duluan.
+      start_period: 15s
 
   # Alloy butuh akses Docker socket HOST (read-only) untuk bisa
   # menemukan & membaca log container lain -- lihat penjelasan lengkap
