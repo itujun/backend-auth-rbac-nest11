@@ -210,6 +210,29 @@ docker compose --profile full up -d --build app
 Ini pakai `Dockerfile.dev` (bukan Dockerfile production) dan container-nya
 bernama `rbac_app`.
 
+**Kapan butuh command lengkap di atas vs cukup tombol Start/Stop biasa
+di Docker Desktop?**
+
+| Situasi                                                         | Yang perlu dilakukan                                                                                          |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Pertama kali (container `rbac_app` belum pernah dibuat)         | `docker compose --profile full up -d --build app`                                                             |
+| Stop lalu start lagi (container sudah ada, cuma mau nyala/mati) | Cukup tombol **Start**/**Stop** di Docker Desktop seperti container lain                                      |
+| Habis ubah source code (`.ts`)                                  | Tidak perlu apa-apa — sudah ada bind mount `.:/app`, dev server watch-mode di dalam container otomatis reload |
+| Habis ubah `package.json` / `Dockerfile.dev`                    | Ulang dengan `--build` lagi (perlu `npm ci` ulang & rebuild image)                                            |
+| Habis `docker compose down` (container benar-benar dihapus)     | Balik ke command awal (`--profile full up -d --build app`)                                                    |
+
+`--profile full` cuma relevan untuk command yang menentukan service mana
+yang ikut dibuat/dikelola (`up`, `down`, `create`). Begitu container-nya
+sudah ada secara fisik, tombol Start/Stop bekerja langsung di level
+container itu sendiri, profile sudah tidak relevan lagi di titik itu.
+
+> ✅ **Sudah divalidasi live end-to-end** (11 Sep 2026): dari container
+> discovery di Alloy, log bootstrap NestJS (`Nest application
+successfully started`, dst), sampai log request API sungguhan
+> (`request completed` dengan `x-request-id`, header sensitif ter-
+> `**REDACTED**`) berhasil muncul dan bisa di-query di Grafana Explore
+> dengan `{container="rbac_app"}`.
+
 ### Dasar-Dasar Query LogQL
 
 Alloy cuma menarik log dari container milik project ini (difilter via
@@ -264,6 +287,8 @@ Operator penting:
 - **Persistence**: volume `rbac_lokidata` & `rbac_grafanadata` sudah di-mount di `docker-compose.yml`, jadi log & dashboard tidak hilang saat container di-restart. Hilang kalau pakai `docker compose down -v` (volume ikut dihapus).
 - **Retention**: dikontrol lewat `limits_config.retention_period` di `observability/loki-config.yaml` — sesuaikan kalau butuh log disimpan lebih lama/pendek dari default.
 - **Kalau mau tambah project lain berjalan bersamaan** di mesin yang sama: aman, karena filter `com.docker.compose.project: rbac-backend` di Alloy memastikan cuma container project ini yang log-nya ditarik.
+- **Race condition saat cold start**: healthcheck Loki punya `start_period: 15s` (masa tenggang sebelum kegagalan dihitung), supaya `alloy`/`grafana` (yang `depends_on: loki: condition: service_healthy`) tidak gagal start bareng grup saat semua container baru dinyalakan bersamaan dan sistem sedang sibuk. Kalau tetap terjadi (jarang), cukup start manual `rbac_alloy`/`rbac_grafana` setelah Loki sehat — bukan tanda konfigurasi rusak.
+- **Kategori `unknown` di grafik "Logs volume"**: kadang muncul untuk baris log yang bukan JSON murni (mis. output bawaan npm/Nest sebelum logger pino aktif). Tidak mengganggu fungsi, cuma berarti sebagian kecil baris belum terstruktur penuh.
 
 ## Health Check
 
@@ -900,18 +925,18 @@ curl -X POST http://localhost:3000/api/permissions \
         otomatis (tidak perlu setup manual).
 
         **Kalau mau lihat log app KAMU SENDIRI di Grafana** (bukan
-                cuma Postgres/Redis): app yang jalan host-mode
-                (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
-                cuma bisa lihat container Docker). Matikan dulu
-                `npm run start:dev`, lalu:
-                `docker compose --profile full up -d --build app` — ini
-                menjalankan app di container dev (`Dockerfile.dev`, BUKAN
-                Dockerfile production — itu roadmap terpisah) khusus untuk
-                keperluan demo/verifikasi pipeline observability ini.
+                    cuma Postgres/Redis): app yang jalan host-mode
+                    (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
+                    cuma bisa lihat container Docker). Matikan dulu
+                    `npm run start:dev`, lalu:
+                    `docker compose --profile full up -d --build app` — ini
+                    menjalankan app di container dev (`Dockerfile.dev`, BUKAN
+                    Dockerfile production — itu roadmap terpisah) khusus untuk
+                    keperluan demo/verifikasi pipeline observability ini.
 
-                Contoh query LogQL di Grafana Explore:
-                `{container="rbac_app"} | json | level="error"` (semua error
-                dari app).
+                    Contoh query LogQL di Grafana Explore:
+                    `{container="rbac_app"} | json | level="error"` (semua error
+                    dari app).
 
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [x] Redis caching (permission checks) — cache-aside pada
