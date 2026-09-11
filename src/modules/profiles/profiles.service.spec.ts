@@ -77,39 +77,69 @@ describe('ProfilesService', () => {
   });
 
   describe('updateOwn / updateByUserId', () => {
-    it('update sukses kalau profile ada', async () => {
-      const { service, findByUserIdMock, updateByUserIdMock } = createService();
+    const selfActor = { userId: 1, email: 'budi@example.com' };
+    const adminActor = { userId: 99, email: 'admin@example.com' };
+
+    it('update sukses kalau profile ada, dan mencatat audit log profile.update dengan actor yang diberikan', async () => {
+      const { service, findByUserIdMock, updateByUserIdMock, recordMock } =
+        createService();
       findByUserIdMock.mockResolvedValue(fakeProfile());
       updateByUserIdMock.mockResolvedValue(
         fakeProfile({ fullName: 'Nama Baru' }),
       );
 
-      const result = await service.updateOwn(1, { fullName: 'Nama Baru' });
+      const result = await service.updateOwn(
+        1,
+        { fullName: 'Nama Baru' },
+        selfActor,
+      );
 
       expect(updateByUserIdMock).toHaveBeenCalledWith(1, {
         fullName: 'Nama Baru',
       });
       expect(result.fullName).toBe('Nama Baru');
+      expect(recordMock).toHaveBeenCalledWith({
+        action: 'profile.update',
+        actorUserId: selfActor.userId,
+        actorEmail: selfActor.email,
+        resourceType: 'profile',
+        resourceId: 1,
+      });
     });
 
-    it('menolak update kalau profile tidak ada (tidak pernah sampai query update)', async () => {
-      const { service, findByUserIdMock, updateByUserIdMock } = createService();
+    it('menolak update kalau profile tidak ada (tidak pernah sampai query update, tidak mencatat audit log)', async () => {
+      const { service, findByUserIdMock, updateByUserIdMock, recordMock } =
+        createService();
       findByUserIdMock.mockResolvedValue(undefined);
 
-      await expect(service.updateOwn(999, { fullName: 'x' })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        service.updateOwn(999, { fullName: 'x' }, selfActor),
+      ).rejects.toThrow(NotFoundException);
       expect(updateByUserIdMock).not.toHaveBeenCalled();
+      expect(recordMock).not.toHaveBeenCalled();
     });
 
-    it('updateByUserId() (endpoint admin) berperilaku identik dengan updateOwn()', async () => {
-      const { service, findByUserIdMock, updateByUserIdMock } = createService();
+    it('updateByUserId() (endpoint admin) berperilaku identik dengan updateOwn(), audit log pakai actor admin bukan target user', async () => {
+      const { service, findByUserIdMock, updateByUserIdMock, recordMock } =
+        createService();
       findByUserIdMock.mockResolvedValue(fakeProfile());
       updateByUserIdMock.mockResolvedValue(fakeProfile({ bio: 'Halo' }));
 
-      const result = await service.updateByUserId(1, { bio: 'Halo' });
+      const result = await service.updateByUserId(
+        1,
+        { bio: 'Halo' },
+        adminActor,
+      );
 
       expect(result.bio).toBe('Halo');
+      expect(recordMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'profile.update',
+          actorUserId: adminActor.userId,
+          actorEmail: adminActor.email,
+          resourceId: 1,
+        }),
+      );
     });
   });
 

@@ -62,7 +62,10 @@ export class ProfilesController {
     @CurrentUser() user: SafeUser,
     @Body() dto: UpdateProfileDto,
   ) {
-    return this.profilesService.updateOwn(user.id, dto);
+    return this.profilesService.updateOwn(user.id, dto, {
+      userId: user.id,
+      email: user.email,
+    });
   }
 
   @Post('profile/me/avatar')
@@ -140,9 +143,13 @@ export class ProfilesController {
   })
   @ResponseMessage('Profil user berhasil diperbarui')
   updateUserProfile(
+    @CurrentUser() actor: SafeUser,
     @Param('userId', ParseIntPipe) userId: number,
     @Body() dto: UpdateProfileDto,
   ) {
-    return this.profilesService.updateByUserId(userId, dto);
+    return this.profilesService.updateByUserId(userId, dto, {
+      userId: actor.id,
+      email: actor.email,
+    });
   }
 }

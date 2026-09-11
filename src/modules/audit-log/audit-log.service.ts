@@ -24,6 +24,7 @@ export type AuditAction =
   | 'permission.create'
   | 'permission.update'
   | 'permission.delete'
+  | 'profile.update'
   | 'profile.avatar_update'
   | 'profile.avatar_reset';
 

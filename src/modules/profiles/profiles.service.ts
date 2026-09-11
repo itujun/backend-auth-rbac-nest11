@@ -6,7 +6,7 @@ import {
 import { ProfilesRepository, UpdateProfileFields } from './profiles.repository';
 import { AvatarStorageService } from './storage/avatar-storage.service';
 import { DEFAULT_AVATAR_URL } from '../../database/schema';
-import { AuditLogService } from '../audit-log/audit-log.service';
+import { AuditLogService, AuditActor } from '../audit-log/audit-log.service';
 
 @Injectable()
 export class ProfilesService {
@@ -30,14 +30,27 @@ export class ProfilesService {
     return profile;
   }
 
-  async updateOwn(userId: number, dto: UpdateProfileFields) {
+  async updateOwn(userId: number, dto: UpdateProfileFields, actor: AuditActor) {
     await this.getByUserIdOrThrow(userId);
-    return this.profilesRepository.updateByUserId(userId, dto);
+    const updated = await this.profilesRepository.updateByUserId(userId, dto);
+
+    // actor bisa berbeda dari userId (mis. admin ubah profile user lain
+    // lewat updateByUserId di bawah, yang delegasi ke sini) — makanya
+    // actorUserId/email diambil dari `actor`, bukan diasumsikan = userId.
+    await this.auditLogService.record({
+      action: 'profile.update',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      resourceType: 'profile',
+      resourceId: userId,
+    });
+
+    return updated;
   }
 
   /** Dipakai endpoint admin (PATCH /profiles/:userId) — logic sama, dipisah biar intent-nya jelas di controller/route. */
-  updateByUserId(userId: number, dto: UpdateProfileFields) {
-    return this.updateOwn(userId, dto);
+  updateByUserId(userId: number, dto: UpdateProfileFields, actor: AuditActor) {
+    return this.updateOwn(userId, dto, actor);
   }
 
   async updateAvatar(userId: number, file?: Express.Multer.File) {
