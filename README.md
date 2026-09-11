@@ -161,6 +161,110 @@ persis sama, cuma outputnya sekarang lewat pino
 (`app.useLogger(app.get(Logger))` di `main.ts` yang menangani switch ini
 secara transparan).
 
+## Centralized Logging (Grafana Loki + Alloy + Grafana)
+
+> Catatan istilah: ini **centralized logging**, bukan "observability"
+> secara utuh — baru mencakup satu pilar (logs). Belum ada metrics
+> (Prometheus/Mimir) atau distributed tracing (Tempo/Jaeger) di project
+> ini.
+
+Log JSON dari `nestjs-pino` (lihat section [Logging](#logging) di atas)
+dikumpulkan terpusat lewat pipeline berikut:
+
+```
+NestJS App (JSON ke stdout) → Alloy (Docker socket) → Loki (storage) → Grafana (UI)
+```
+
+`docker compose up -d` menjalankan `postgres`, `redis`, **dan**
+`loki`, `alloy`, `grafana` sekaligus.
+
+### Cara Akses
+
+| Tool         | URL                    | Keterangan                                                                                                                                                                                                                                                                      |
+| ------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Grafana**  | http://localhost:3300  | Login anonim otomatis sebagai Admin (`GF_AUTH_ANONYMOUS_ENABLED`) — **hanya untuk dev lokal**, tidak boleh dipakai kalau di-expose ke jaringan/internet. Tidak perlu setup datasource manual, Loki sudah ter-provisioning otomatis lewat `observability/grafana/provisioning/`. |
+| **Loki API** | http://localhost:3100  | Tidak ada UI. Cek kesiapan: `curl http://localhost:3100/ready`                                                                                                                                                                                                                  |
+| **Alloy UI** | http://localhost:12345 | Debug pipeline (discovery, relabeling, target mana yang berhasil ditemukan) — bukan tempat lihat log app.                                                                                                                                                                       |
+
+> Port Grafana sengaja **3300**, bukan default `3000`, karena `3000` di
+> host sudah dipakai app NestJS sendiri (`npm run start:dev`).
+
+### Cara Melihat Log
+
+1. Buka http://localhost:3300 → langsung masuk (anonymous auth, tanpa login form)
+2. Klik **Explore** (ikon kompas) di sidebar
+3. Datasource **Loki** sudah otomatis terpilih (default)
+4. Jalankan query LogQL — lihat contoh di bawah
+5. Cek **time range** di kanan atas kalau log tidak muncul (default sering cuma "Last 1 hour")
+
+**Penting — kalau mau lihat log app kamu sendiri (bukan cuma Postgres/Redis):**
+Alloy menemukan container lewat Docker socket, jadi app yang jalan di
+host (`npm run start:dev`) **tidak akan pernah terlihat** oleh Alloy,
+walau log JSON-nya sendiri sudah benar. Untuk demo/verifikasi pipeline
+ini, matikan dulu `npm run start:dev`, lalu jalankan app di container:
+
+```bash
+docker compose --profile full up -d --build app
+```
+
+Ini pakai `Dockerfile.dev` (bukan Dockerfile production) dan container-nya
+bernama `rbac_app`.
+
+### Dasar-Dasar Query LogQL
+
+Alloy cuma menarik log dari container milik project ini (difilter via
+label `com.docker.compose.project: rbac-backend`, lihat
+`observability/alloy/config.alloy`), dan **hanya field `level` yang
+dipromosikan jadi label** (cardinality rendah, ~6 nilai tetap). Field
+lain (`reqId`, `userId`, `msg`, dst) sengaja **tidak** di-index sebagai
+label — tetap ada di isi log dan dicari lewat `| json` saat query, biar
+tidak kena "cardinality explosion" (index Loki meledak karena label
+dengan nilai unik terlalu banyak).
+
+```logql
+# Semua log dari container app ini, level error saja
+{container="rbac_app"} | json | level="error"
+
+# Semua log level warn/error lintas SEMUA container project ini
+{level=~"warn|error"}
+
+# Full-text search tanpa parsing JSON
+{container="rbac_app"} |= "database connection"
+
+# Cari berdasarkan reqId tertentu (field ini bukan label, wajib | json dulu)
+{container="rbac_app"} | json | reqId="abc-123"
+
+# Hitung jumlah error per menit (cocok untuk panel time series)
+sum(count_over_time({container="rbac_app"} | json | level="error" [1m]))
+```
+
+Operator penting:
+
+| Operator  | Arti                                                                        |
+| --------- | --------------------------------------------------------------------------- |
+| `\|=`     | baris mengandung teks tertentu                                              |
+| `!=`      | label tidak sama dengan                                                     |
+| `\|~`     | regex match                                                                 |
+| `!~`      | regex tidak match                                                           |
+| `\| json` | parse baris log sebagai JSON agar field non-label bisa difilter/ditampilkan |
+
+### Debugging: Log Tidak Muncul di Grafana
+
+1. Pastikan app benar-benar jalan **di container**, bukan `npm run start:dev` (lihat catatan di atas) — cek dengan `docker compose ps`
+2. Cek Alloy UI (`:12345`) — pastikan `rbac_app` muncul sebagai target yang berhasil di-discover
+3. Cek Loki langsung:
+   ```bash
+   curl http://localhost:3100/ready
+   curl 'http://localhost:3100/loki/api/v1/query?query={container="rbac_app"}'
+   ```
+4. Cek time range di Grafana Explore — penyebab paling sering log "tidak ada" padahal sudah masuk
+
+### Catatan Lain
+
+- **Persistence**: volume `rbac_lokidata` & `rbac_grafanadata` sudah di-mount di `docker-compose.yml`, jadi log & dashboard tidak hilang saat container di-restart. Hilang kalau pakai `docker compose down -v` (volume ikut dihapus).
+- **Retention**: dikontrol lewat `limits_config.retention_period` di `observability/loki-config.yaml` — sesuaikan kalau butuh log disimpan lebih lama/pendek dari default.
+- **Kalau mau tambah project lain berjalan bersamaan** di mesin yang sama: aman, karena filter `com.docker.compose.project: rbac-backend` di Alloy memastikan cuma container project ini yang log-nya ditarik.
+
 ## Health Check
 
 `GET /health` (`GET /api/health` dengan prefix) sekarang berbasis
@@ -796,18 +900,18 @@ curl -X POST http://localhost:3000/api/permissions \
         otomatis (tidak perlu setup manual).
 
         **Kalau mau lihat log app KAMU SENDIRI di Grafana** (bukan
-            cuma Postgres/Redis): app yang jalan host-mode
-            (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
-            cuma bisa lihat container Docker). Matikan dulu
-            `npm run start:dev`, lalu:
-            `docker compose --profile full up -d --build app` — ini
-            menjalankan app di container dev (`Dockerfile.dev`, BUKAN
-            Dockerfile production — itu roadmap terpisah) khusus untuk
-            keperluan demo/verifikasi pipeline observability ini.
+                cuma Postgres/Redis): app yang jalan host-mode
+                (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
+                cuma bisa lihat container Docker). Matikan dulu
+                `npm run start:dev`, lalu:
+                `docker compose --profile full up -d --build app` — ini
+                menjalankan app di container dev (`Dockerfile.dev`, BUKAN
+                Dockerfile production — itu roadmap terpisah) khusus untuk
+                keperluan demo/verifikasi pipeline observability ini.
 
-            Contoh query LogQL di Grafana Explore:
-            `{container="rbac_app"} | json | level="error"` (semua error
-            dari app).
+                Contoh query LogQL di Grafana Explore:
+                `{container="rbac_app"} | json | level="error"` (semua error
+                dari app).
 
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [x] Redis caching (permission checks) — cache-aside pada
