@@ -33,7 +33,26 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
-      "prettier/prettier": ["error", { endOfLine: "auto" }],
+      'prettier/prettier': ['error', { endOfLine: 'auto' }],
+    },
+  },
+  {
+    // Longgarkan rule "no-unsafe-*" KHUSUS untuk file test (src/ TETAP
+    // strict, tidak berubah). Alasan: supertest men-tipe-kan
+    // `Response.body` sebagai `any` (bukan generic per-request) --
+    // assertion E2E lewat `res.body.data.xxx` SECARA INHEREN "unsafe"
+    // menurut rule ini, terlepas seberapa hati-hati kode test-nya
+    // ditulis. Menambah interface/type-guard manual di ratusan titik
+    // assertion test cuma untuk memuaskan linter tidak menambah jaminan
+    // korektnes nyata (kalau shape response berubah, test-nya sendiri
+    // yang bakal gagal saat dijalankan -- itu jaring pengaman
+    // sebenarnya di sini, bukan compile-time type check).
+    files: ['test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
     },
   },
 );
