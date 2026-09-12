@@ -83,7 +83,8 @@ jalankan ketiganya:
 ```bash
 npm run typecheck   # tsc --noEmit — pastikan tidak ada error tipe
 npm run lint         # ESLint (typescript-eslint recommendedTypeChecked)
-npm run test         # unit test (menyusul di Phase 6)
+npm run test         # unit test
+npm run test:e2e     # E2E test (butuh Docker daemon jalan -- lihat bagian Testing E2E di bawah)
 ```
 
 Catatan penting: `typecheck`/`lint` hanya akurat SETELAH `npm install`
@@ -210,29 +211,6 @@ docker compose --profile full up -d --build app
 Ini pakai `Dockerfile.dev` (bukan Dockerfile production) dan container-nya
 bernama `rbac_app`.
 
-**Kapan butuh command lengkap di atas vs cukup tombol Start/Stop biasa
-di Docker Desktop?**
-
-| Situasi                                                         | Yang perlu dilakukan                                                                                          |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Pertama kali (container `rbac_app` belum pernah dibuat)         | `docker compose --profile full up -d --build app`                                                             |
-| Stop lalu start lagi (container sudah ada, cuma mau nyala/mati) | Cukup tombol **Start**/**Stop** di Docker Desktop seperti container lain                                      |
-| Habis ubah source code (`.ts`)                                  | Tidak perlu apa-apa — sudah ada bind mount `.:/app`, dev server watch-mode di dalam container otomatis reload |
-| Habis ubah `package.json` / `Dockerfile.dev`                    | Ulang dengan `--build` lagi (perlu `npm ci` ulang & rebuild image)                                            |
-| Habis `docker compose down` (container benar-benar dihapus)     | Balik ke command awal (`--profile full up -d --build app`)                                                    |
-
-`--profile full` cuma relevan untuk command yang menentukan service mana
-yang ikut dibuat/dikelola (`up`, `down`, `create`). Begitu container-nya
-sudah ada secara fisik, tombol Start/Stop bekerja langsung di level
-container itu sendiri, profile sudah tidak relevan lagi di titik itu.
-
-> ✅ **Sudah divalidasi live end-to-end** (11 Sep 2026): dari container
-> discovery di Alloy, log bootstrap NestJS (`Nest application
-successfully started`, dst), sampai log request API sungguhan
-> (`request completed` dengan `x-request-id`, header sensitif ter-
-> `**REDACTED**`) berhasil muncul dan bisa di-query di Grafana Explore
-> dengan `{container="rbac_app"}`.
-
 ### Dasar-Dasar Query LogQL
 
 Alloy cuma menarik log dari container milik project ini (difilter via
@@ -287,8 +265,6 @@ Operator penting:
 - **Persistence**: volume `rbac_lokidata` & `rbac_grafanadata` sudah di-mount di `docker-compose.yml`, jadi log & dashboard tidak hilang saat container di-restart. Hilang kalau pakai `docker compose down -v` (volume ikut dihapus).
 - **Retention**: dikontrol lewat `limits_config.retention_period` di `observability/loki-config.yaml` — sesuaikan kalau butuh log disimpan lebih lama/pendek dari default.
 - **Kalau mau tambah project lain berjalan bersamaan** di mesin yang sama: aman, karena filter `com.docker.compose.project: rbac-backend` di Alloy memastikan cuma container project ini yang log-nya ditarik.
-- **Race condition saat cold start**: healthcheck Loki punya `start_period: 15s` (masa tenggang sebelum kegagalan dihitung), supaya `alloy`/`grafana` (yang `depends_on: loki: condition: service_healthy`) tidak gagal start bareng grup saat semua container baru dinyalakan bersamaan dan sistem sedang sibuk. Kalau tetap terjadi (jarang), cukup start manual `rbac_alloy`/`rbac_grafana` setelah Loki sehat — bukan tanda konfigurasi rusak.
-- **Kategori `unknown` di grafik "Logs volume"**: kadang muncul untuk baris log yang bukan JSON murni (mis. output bawaan npm/Nest sebelum logger pino aktif). Tidak mengganggu fungsi, cuma berarti sebagian kecil baris belum terstruktur penuh.
 
 ## Health Check
 
@@ -385,6 +361,94 @@ kepatuhan. Dua hal ini sengaja dipisah, bukan duplikat.
 | `npm run db:migrate`  | Terapkan migration yang belum berjalan ke database                                               |
 | `npm run db:push`     | Push schema langsung ke DB tanpa file migration (khusus prototyping cepat, hindari di kerja tim) |
 | `npm run db:studio`   | Buka Drizzle Studio (GUI browser untuk lihat isi database)                                       |
+
+## Testing E2E
+
+```bash
+npm run test:e2e
+```
+
+**Satu-satunya syarat: Docker daemon/Docker Desktop harus hidup.** Tidak
+perlu jalankan `rbac_postgres`/`rbac_redis`/`rbac_app` dulu —
+[Testcontainers](https://testcontainers.com/) otomatis membuat container
+Postgres sendiri (`postgres:16-alpine`, sama seperti `docker-compose.yml`
+dev), terisolasi total dari data dev, lalu dihapus lagi begitu test
+selesai.
+
+**Redis SENGAJA tidak dijalankan di E2E.** `RedisModule` didesain
+cache-aside murni (lihat bagian Redis caching di Progress Roadmap) —
+kalau Redis tidak terjangkau, aplikasi fallback ke query DB langsung,
+bukan crash. E2E memvalidasi justru fallback ini benar-benar berfungsi.
+Test tetap lolos identik baik Redis dinyalakan (`docker compose up -d
+redis`) maupun tidak — kalau dinyalakan, cuma menghilangkan baris log
+`ECONNREFUSED` di output test, tidak mengubah hasil.
+
+**Cakupan saat ini** (3 file, 51 test case):
+
+- `test/app.e2e-spec.ts` — health check (`GET /api/health` benar-benar
+  cek koneksi Postgres, bukan cuma "aplikasi hidup").
+- `test/auth.e2e-spec.ts` — register, login (termasuk anti
+  user-enumeration: pesan error identik antara email tidak terdaftar vs
+  password salah), refresh (rotasi + theft-detection saat token lama
+  di-reuse), logout.
+- `test/rbac.e2e-spec.ts` — guard enforcement (401/403/200), CRUD role +
+  permission lengkap, sync permission ke role, assign/revoke role ke
+  user.
+
+**Infra test** (`test/setup/`, `test/utils/`):
+
+- `global-setup.ts`/`global-teardown.ts` — start/stop container Postgres
+  sekali per keseluruhan run (bukan per file/per test), jalankan
+  migration Drizzle sebelum test file di-load.
+- `create-test-app.ts` — bootstrap Nest app meniru `main.ts` persis
+  (ValidationPipe, exception filter, response interceptor, prefix
+  `/api`), override `ThrottlerStorage` (bukan `ThrottlerGuard` — lihat
+  bug section di bawah) supaya rate-limit tidak mengganggu banyak
+  skenario test dalam satu file.
+- `db-cleanup.ts` — `TRUNCATE ... CASCADE` semua tabel app antar test
+  (BUKAN `RESTART IDENTITY` — lihat bug section di bawah kenapa).
+- `auth-test.util.ts`/`rbac-test.util.ts` — helper register+login dan
+  "jadi admin" (insert permission/role langsung lewat DB, bypass API)
+  yang dipakai bareng lintas file test.
+
+**Menjalankan file tertentu saja** (lebih cepat saat develop test baru):
+
+```bash
+npx jest --config ./test/jest-e2e.json test/rbac.e2e-spec.ts
+```
+
+## Bug Nyata yang Ditemukan Saat Testing: RESTART IDENTITY vs Cache Redis
+
+Saat menulis E2E test RBAC, semua test yang butuh permission SELALU
+gagal 403 — tapi HANYA kalau container `rbac_redis` sedang menyala;
+kalau Redis mati, test yang sama lolos semua. Root cause-nya kombinasi
+dua hal yang masing-masing terlihat masuk akal sendiri-sendiri:
+
+1. `db-cleanup.ts` pakai `TRUNCATE ... RESTART IDENTITY CASCADE` supaya
+   ID predictable antar test — artinya ID user/role **di-reset ke 1
+   lagi di setiap `beforeEach`**.
+2. `PermissionsCacheService` nge-cache hasil cek permission ke Redis
+   dengan key berbasis **user ID**, TTL 300 detik — dan Redis hidup
+   terus lintas SEMUA test dalam satu run (`TRUNCATE` cuma
+   membersihkan Postgres, sama sekali tidak menyentuh Redis).
+
+Akibatnya: test A meregister user yang kebetulan dapat id=1, dicek
+izinnya (kosong), PermissionsGuard cache "user id=1 tidak punya izin
+apapun" ke Redis. `beforeEach` jalan lagi, ID di-reset. Test B
+meregister user BARU yang — karena ID di-reset — JUGA kebagian id=1,
+lalu di-grant permission langsung lewat DB. Saat test B memanggil
+endpoint, `PermissionsGuard` cek cache dulu, ketemu entry basi milik
+user test A ("id=1 tidak punya izin"), dan menolak — padahal user test
+B ini secara logis sama sekali berbeda dari user test A.
+
+Fix: hapus `RESTART IDENTITY` dari `TRUNCATE` di `db-cleanup.ts`. ID
+sekarang terus naik antar test, tidak pernah dipakai ulang dalam satu
+run — cache Redis manapun yang basi otomatis tidak relevan lagi karena
+key-nya (berbasis ID) tidak akan pernah bertabrakan dengan test lain.
+Pelajaran: **truncate DB tanpa ikut membersihkan cache eksternal (Redis,
+dsb) itu berbahaya kalau ID di-reset** — cache jadi satu-satunya state
+yang "ingat" data lama, dan bakal ke-attach ke entity baru yang
+kebetulan dapat ID yang sama.
 
 ## Arsitektur
 
@@ -958,12 +1022,14 @@ curl -X POST http://localhost:3000/api/permissions \
         terpisah dari aggregator utama) dan test unit lengkap di
         `permissions-cache.service.spec.ts`, `authorization.service.spec.ts`,
         `roles.service.spec.ts`, `permissions.service.spec.ts`.
-  - [~] Testing — **unit test SELESAI** (~140 test: util murni, guards,
-    filter/interceptor, `AuthService`, `RefreshTokensService`,
-    `UsersService`, `ProfilesService`, `AvatarStorageService`,
-    `RolesService`, `PermissionsService`). **E2E test DIJEDA** —
-    infra bootstrap, alur auth, RBAC, dan update README terkait
-    belum dikerjakan. Lanjutkan ini sebelum deploy ke production.
+  - [x] Testing — **unit test SELESAI** (~140 test: util murni, guards,
+        filter/interceptor, `AuthService`, `RefreshTokensService`,
+        `UsersService`, `ProfilesService`, `AvatarStorageService`,
+        `RolesService`, `PermissionsService`). **E2E test SELESAI** — 51
+        test case lintas 3 file (`app`/`auth`/`rbac.e2e-spec.ts`) via
+        Testcontainers (Postgres asli, bukan mock/in-memory). Detail
+        lengkap (cara jalanin, apa yang dites, bug yang ketemu selagi
+        nulis test-nya) ada di section **Testing E2E** di atas.
   - [x] Audit log module — tabel `audit_logs` (actor + snapshot email,
         action bebas non-enum, resource, metadata jsonb, index
         `actorUserId`/`createdAt`), `AuditLogService.record()`
