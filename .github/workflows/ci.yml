@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 # Batalkan run lama kalau ada push baru ke branch/PR yang sama -- hasil
 # run lama sudah tidak relevan begitu ada commit baru, hemat CI minutes.
