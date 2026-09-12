@@ -3,6 +3,10 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "globalSetup": "<rootDir>/setup/global-setup.ts",
+  "globalTeardown": "<rootDir>/setup/global-teardown.ts",
+  "maxWorkers": 1,
+  "testTimeout": 30000,
   "transform": {
     "^.+\\.(t|j)s$": [
       "@swc/jest",
@@ -16,6 +20,6 @@
     ]
   },
   "transformIgnorePatterns": [
-    "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@standard-schema|drizzle-orm)/)"
+    "node_modules/(?!(@nestjs/config|@nestjs/jwt|@nestjs/passport|@standard-schema|drizzle-orm|testcontainers|@testcontainers)/)"
   ]
 }
