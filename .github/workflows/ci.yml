@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Batalkan run lama kalau ada push baru ke branch/PR yang sama -- hasil
+# run lama sudah tidak relevan begitu ada commit baru, hemat CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Node 22 -- SAMA PERSIS dengan base image Dockerfile.dev, supaya
+# perilaku (termasuk native addon: argon2, sharp) konsisten antara CI
+# dan container dev/production.
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # 1. Lint & Typecheck -- paling cepat gagal, jalan duluan (fail fast)
+  #    sebelum buang waktu CI ke test/build kalau cuma salah format/tipe.
+  # ---------------------------------------------------------------------
+  lint:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      # SENGAJA "lint:ci" (tanpa --fix), BUKAN "lint" yang dipakai lokal
+      # -- CI harus GAGAL kalau ada pelanggaran, bukan diam-diam
+      # membetulkan lalu tetap lolos hijau walau commit-nya sendiri
+      # belum rapi.
+      - run: npm run lint:ci
+
+  # ---------------------------------------------------------------------
+  # 2. Unit test -- ~140 test, semua terisolasi (repository/service
+  #    di-mock), TIDAK butuh Postgres/Redis apapun.
+  # ---------------------------------------------------------------------
+  test:
+    name: Unit Test
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run test -- --ci
+
+  # ---------------------------------------------------------------------
+  # 3. E2E test -- 51 test case, pakai Testcontainers (bikin container
+  #    Postgres sendiri via Docker API). TIDAK butuh services: block
+  #    tambahan apapun di sini -- runner ubuntu-latest bawaan GitHub
+  #    Actions sudah ada Docker daemon aktif, Testcontainers otomatis
+  #    pakai itu. Redis SENGAJA tidak dijalankan (lihat README bagian
+  #    "Testing E2E" -- fallback tanpa Redis adalah bagian yang
+  #    divalidasi, bukan kekurangan).
+  # ---------------------------------------------------------------------
+  test-e2e:
+    name: E2E Test
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run test:e2e
+
+  # ---------------------------------------------------------------------
+  # 4. Build -- paling akhir, buktikan `nest build` (dipakai
+  #    start:prod/Dockerfile production nanti) benar-benar sukses
+  #    setelah semua pemeriksaan lain lolos.
+  # ---------------------------------------------------------------------
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - run: npm run build

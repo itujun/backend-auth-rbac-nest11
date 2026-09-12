@@ -1041,6 +1041,14 @@ curl -X POST http://localhost:3000/api/permissions \
         update/reset — self-service, tanpa actor terpisah). Endpoint
         admin `GET /audit-logs` (pagination + filter actorUserId/
         action/resourceType, permission baru `audit-log:read`).
-  - [ ] CI pipeline (GitHub Actions: lint → test → build)
+  - [x] CI pipeline (GitHub Actions: lint → test → build) — 4 job
+        berurutan (`needs:`) di `.github/workflows/ci.yml`, jalan tiap
+        push/PR ke `main`: **Lint & Typecheck** → **Unit Test** → **E2E
+        Test** (Testcontainers, jalan native di runner GitHub-hosted
+        tanpa setup tambahan — Docker daemon sudah tersedia) → **Build**
+        (`nest build`). Fail fast: berhenti di job pertama yang gagal,
+        job selanjutnya di-skip otomatis. Script `lint:ci` (tanpa
+        `--fix`) dipakai khusus CI, terpisah dari `lint` lokal — CI
+        harus gagal kalau ada pelanggaran, bukan diam-diam dibetulkan.
   - [ ] Dockerfile production (multi-stage build)
 - [ ] **Phase 7 — Frontend Svelte** (simulasi UI untuk testing manual seluruh fitur backend)
