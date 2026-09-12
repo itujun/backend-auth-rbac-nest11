@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { App } from 'supertest/types';
 
 export interface RegisterInput {
   email: string;
@@ -44,7 +45,7 @@ export function extractRefreshCookie(res: request.Response): string {
 }
 
 export async function registerUser(
-  app: INestApplication,
+  app: INestApplication<App>,
   input: RegisterInput,
 ): Promise<RegisteredUser> {
   const res = await request(app.getHttpServer())
@@ -56,7 +57,7 @@ export async function registerUser(
 }
 
 export async function loginUser(
-  app: INestApplication,
+  app: INestApplication<App>,
   credentials: { email: string; password: string },
 ): Promise<LoggedInSession> {
   const res = await request(app.getHttpServer())
@@ -73,7 +74,7 @@ export async function loginUser(
 
 /** Shortcut register + login sekaligus -- dipakai kebanyakan test yang cuma butuh "ada user yang sudah login", tanpa peduli detail proses register/login-nya sendiri. */
 export async function registerAndLogin(
-  app: INestApplication,
+  app: INestApplication<App>,
   input: RegisterInput,
 ): Promise<LoggedInSession> {
   await registerUser(app, input);
