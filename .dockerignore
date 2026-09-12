@@ -14,6 +14,18 @@ uploads
 
 .git
 .vscode
+.github
+
+# Tidak dibutuhkan Dockerfile.dev (cuma jalankan `start:dev`, tidak
+# pernah nge-run test) maupun Dockerfile production (test/ tidak
+# pernah di-COPY eksplisit sama sekali di sana) -- exclude di sini
+# murni mempercepat build context, BUKAN dependency runtime.
+test
+
+# Dokumentasi & config yang tidak relevan di dalam image manapun.
+README.md
+docker-compose.yml
+observability
 
 *.log
 npm-debug.log*

@@ -266,6 +266,90 @@ Operator penting:
 - **Retention**: dikontrol lewat `limits_config.retention_period` di `observability/loki-config.yaml` — sesuaikan kalau butuh log disimpan lebih lama/pendek dari default.
 - **Kalau mau tambah project lain berjalan bersamaan** di mesin yang sama: aman, karena filter `com.docker.compose.project: rbac-backend` di Alloy memastikan cuma container project ini yang log-nya ditarik.
 
+## Build & Run Production Image
+
+`Dockerfile` (root project, **bukan** `Dockerfile.dev`) adalah image
+production: multi-stage (`builder` -> `prod-deps` -> `runner`), image
+akhir tidak membawa devDependencies/source TypeScript sama sekali,
+jalan sebagai user non-root, dan punya `HEALTHCHECK` bawaan Docker yang
+betul-betul mengecek `/api/health` (Terminus, verifikasi koneksi
+Postgres asli).
+
+### Build & Jalankan
+
+```bash
+docker build -t rbac-backend:latest .
+
+docker run -d \
+  --name rbac_app_prod \
+  -p 3000:3000 \
+  -e DATABASE_URL="postgres://user:pass@host:5432/rbac_db" \
+  -e JWT_ACCESS_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" \
+  -e CORS_ORIGIN="https://app-frontend-kamu.com" \
+  -v rbac_uploads:/app/uploads \
+  rbac-backend:latest
+```
+
+Cuma **`DATABASE_URL`** dan **`JWT_ACCESS_SECRET`** yang wajib diisi
+(lihat `env.validation.ts`) — sisanya (Redis, CORS, rate limit, dst)
+punya default yang masuk akal, lihat `.env.example` untuk daftar
+lengkap + penjelasan tiap variabel.
+
+**Volume `/app/uploads` sengaja di-mount terpisah** — tanpa ini, avatar
+yang di-upload user akan hilang setiap kali container di-recreate
+(deploy baru = image baru = layer baru = folder ini kembali kosong).
+
+### Migration Database — SENGAJA Tidak Otomatis di Container
+
+`npm run db:migrate` butuh `drizzle-kit` (devDependency), yang **tidak
+ada** di image production (itu keseluruhan poin multi-stage build ini
+— image akhir sengaja seminimal mungkin). Migration dijalankan sebagai
+langkah terpisah **sebelum** deploy versi baru, dari mesin/CI yang
+punya devDependencies lengkap, langsung ke `DATABASE_URL` production:
+
+```bash
+DATABASE_URL="postgres://user:pass@host:5432/rbac_db" npm run db:migrate
+```
+
+Ini pola umum untuk deployment production (migration sebagai release
+step terpisah, bukan tanggung jawab container aplikasi) — menghindari
+race condition kalau nanti container di-scale ke >1 replica (semua
+replica start bersamaan mencoba migrate barengan).
+
+### Kenapa Beberapa Keputusan Desain di `Dockerfile` Begini
+
+- **3 stage, bukan 2** (`builder` install penuh -> `prod-deps` install
+  ulang dari nol khusus `--omit=dev` -> `runner` cuma copy hasil
+  keduanya): dipilih ketimbang `npm prune --omit=dev` dari
+  `node_modules` builder, supaya image akhir dijamin bersih dari
+  devDependencies tanpa bergantung pada edge case `npm prune` dengan
+  native/optional deps (`argon2`, `sharp`).
+- **Tidak perlu `python3`/`make`/`g++`/`vips-dev`**: sudah dicek
+  langsung isi `sharp`'s `optionalDependencies` — varian
+  `@img/sharp-linuxmusl-x64` (khusus Alpine) sudah terdaftar sebagai
+  prebuilt binary resmi, jadi `npm ci` di dalam Alpine otomatis pilih
+  itu tanpa kompilasi dari source. `argon2` malah membundel SEMUA
+  prebuild (termasuk musl) langsung di dalam package-nya sendiri.
+- **User `node` bawaan image, bukan bikin user baru**: `node:22-alpine`
+  resmi sudah menyertakan user non-root `node` (uid/gid 1000) — tidak
+  perlu `RUN adduser` sendiri.
+- **`CMD ["node", "dist/main"]` (exec form), bukan
+  `CMD npm run start:prod`**: exec form membuat proses Node jadi PID 1
+  langsung, menerima `SIGTERM` dari Docker/orchestrator tanpa
+  perantara shell — penting supaya `app.enableShutdownHooks()` di
+  `main.ts` benar-benar sempat jalan (graceful shutdown, tutup koneksi
+  Postgres rapi) saat container di-stop/di-restart.
+
+> ⚠️ **Belum tervalidasi via `docker build` sungguhan** — dibuat &
+> direview manual line-by-line (termasuk cross-check langsung ke
+> `nest-cli.json`, `main.ts`, `env.validation.ts`, dan isi
+> `optionalDependencies` sharp yang ter-install), tapi environment yang
+> dipakai menulis ini tidak punya Docker daemon untuk build asli.
+> **Tolong jalankan `docker build` + `docker run` beneran sebelum
+> dipakai deploy**, terutama untuk verifikasi permission folder
+> `uploads` dan bahwa `HEALTHCHECK` benar-benar melaporkan status
+> `healthy`.
+
 ## Health Check
 
 `GET /health` (`GET /api/health` dengan prefix) sekarang berbasis
@@ -1050,5 +1134,11 @@ curl -X POST http://localhost:3000/api/permissions \
         job selanjutnya di-skip otomatis. Script `lint:ci` (tanpa
         `--fix`) dipakai khusus CI, terpisah dari `lint` lokal — CI
         harus gagal kalau ada pelanggaran, bukan diam-diam dibetulkan.
-  - [ ] Dockerfile production (multi-stage build)
+  - [x] Dockerfile production (`Dockerfile`, multi-stage: builder ->
+        prod-deps -> runner). Image akhir cuma berisi `dist/` + prod
+        `node_modules` (devDependencies TIDAK ikut), non-root user
+        `node` bawaan image resmi, `HEALTHCHECK` ke `/api/health` asli
+        (bukan cuma "proses hidup"). Detail cara build/run & keputusan
+        desain lengkap di section **Build & Run Production Image** di
+        atas.
 - [ ] **Phase 7 — Frontend Svelte** (simulasi UI untuk testing manual seluruh fitur backend)
