@@ -23,14 +23,20 @@ const APP_TABLES = [
  * restart container Postgres (yang jauh lebih mahal, ~1-2 detik per
  * restart vs TRUNCATE yang hitungan milidetik).
  *
- * RESTART IDENTITY: reset counter serial/identity (id) balik ke 1 --
- * supaya assertion di test ("user baru id-nya harus 1") predictable,
- * tidak bergantung sisa data dari test sebelumnya.
+ * SENGAJA TIDAK pakai RESTART IDENTITY: ID (serial/identity) dibiarkan
+ * terus naik antar test, TIDAK di-reset ke 1. Alasannya bukan soal
+ * Postgres, tapi soal Redis -- cache permission (PermissionsCacheService)
+ * di-key berdasarkan user ID dan TIDAK ikut ke-truncate di sini (Redis
+ * hidup terus lintas semua test dalam satu run, TTL 300s). Kalau ID
+ * di-reset tiap test, user BARU di test B gampang kebagian ID yang SAMA
+ * dengan user di test A sebelumnya -- lalu ke-tabrak cache basi milik
+ * user test A yang masih nyangkut di Redis, walau user-nya sudah beda
+ * total secara logis. Ini betulan kejadian & bikin RBAC test flaky
+ * SELALU 403 setiap kali dijalankan dengan Redis nyala, sampai ID tidak
+ * lagi ditumpangi.
  */
 export async function cleanDatabase(app: INestApplication): Promise<void> {
   const db = app.get<DrizzleDb>(DRIZZLE);
   const tables = APP_TABLES.join(', ');
-  await db.execute(
-    sql.raw(`TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE`),
-  );
+  await db.execute(sql.raw(`TRUNCATE TABLE ${tables} CASCADE`));
 }
