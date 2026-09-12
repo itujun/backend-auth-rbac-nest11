@@ -383,7 +383,7 @@ Test tetap lolos identik baik Redis dinyalakan (`docker compose up -d
 redis`) maupun tidak — kalau dinyalakan, cuma menghilangkan baris log
 `ECONNREFUSED` di output test, tidak mengubah hasil.
 
-**Cakupan saat ini** (3 file, 51 test case):
+**Cakupan saat ini** (3 file, 35 test case):
 
 - `test/app.e2e-spec.ts` — health check (`GET /api/health` benar-benar
   cek koneksi Postgres, bukan cuma "aplikasi hidup").
@@ -989,18 +989,18 @@ curl -X POST http://localhost:3000/api/permissions \
         otomatis (tidak perlu setup manual).
 
         **Kalau mau lihat log app KAMU SENDIRI di Grafana** (bukan
-                    cuma Postgres/Redis): app yang jalan host-mode
-                    (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
-                    cuma bisa lihat container Docker). Matikan dulu
-                    `npm run start:dev`, lalu:
-                    `docker compose --profile full up -d --build app` — ini
-                    menjalankan app di container dev (`Dockerfile.dev`, BUKAN
-                    Dockerfile production — itu roadmap terpisah) khusus untuk
-                    keperluan demo/verifikasi pipeline observability ini.
+                        cuma Postgres/Redis): app yang jalan host-mode
+                        (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
+                        cuma bisa lihat container Docker). Matikan dulu
+                        `npm run start:dev`, lalu:
+                        `docker compose --profile full up -d --build app` — ini
+                        menjalankan app di container dev (`Dockerfile.dev`, BUKAN
+                        Dockerfile production — itu roadmap terpisah) khusus untuk
+                        keperluan demo/verifikasi pipeline observability ini.
 
-                    Contoh query LogQL di Grafana Explore:
-                    `{container="rbac_app"} | json | level="error"` (semua error
-                    dari app).
+                        Contoh query LogQL di Grafana Explore:
+                        `{container="rbac_app"} | json | level="error"` (semua error
+                        dari app).
 
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [x] Redis caching (permission checks) — cache-aside pada
@@ -1025,7 +1025,7 @@ curl -X POST http://localhost:3000/api/permissions \
   - [x] Testing — **unit test SELESAI** (~140 test: util murni, guards,
         filter/interceptor, `AuthService`, `RefreshTokensService`,
         `UsersService`, `ProfilesService`, `AvatarStorageService`,
-        `RolesService`, `PermissionsService`). **E2E test SELESAI** — 51
+        `RolesService`, `PermissionsService`). **E2E test SELESAI** — 35
         test case lintas 3 file (`app`/`auth`/`rbac.e2e-spec.ts`) via
         Testcontainers (Postgres asli, bukan mock/in-memory). Detail
         lengkap (cara jalanin, apa yang dites, bug yang ketemu selagi
