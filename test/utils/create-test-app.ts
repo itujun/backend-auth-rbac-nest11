@@ -4,6 +4,7 @@ import { Reflector } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import { Logger as PinoAppLogger, LoggerErrorInterceptor } from 'nestjs-pino';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import type Redis from 'ioredis';
 import { AppModule } from '../../src/app.module';
 import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.filter';
@@ -27,7 +28,35 @@ import { REDIS_CLIENT } from '../../src/core/redis/redis.constants';
 export async function createTestApp(): Promise<INestApplication> {
   const moduleFixture: TestingModule = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    // ThrottlerGuard didaftarkan GLOBAL lewat provider APP_GUARD (bukan
+    // @UseGuards() di controller) -- makanya `overrideGuard(ThrottlerGuard)`
+    // TIDAK bekerja di sini (overrideGuard cuma nyantol ke guard yang
+    // di-resolve lewat reflection metadata @UseGuards(), bukan yang lewat
+    // token APP_GUARD). Ada 3 guard di APP_GUARD (ThrottlerGuard di
+    // AppModule, JwtAuthGuard di AuthModule, PermissionsGuard di
+    // AuthorizationModule) -- override APP_GUARD langsung akan mematikan
+    // KETIGANYA sekaligus (multi-provider di-replace total, bukan cuma
+    // satu entri), padahal JwtAuthGuard/PermissionsGuard justru WAJIB
+    // tetap jalan normal untuk test RBAC nanti.
+    //
+    // Solusi presisi: override `ThrottlerStorage` (provider internal yang
+    // dipakai ThrottlerGuard untuk mencatat jumlah hit per key/route) jadi
+    // storage palsu yang selalu lapor 0 hit -- ThrottlerGuard sendiri
+    // TETAP terpasang & jalan normal, cuma tidak akan pernah menghitung
+    // limit terlampaui. JwtAuthGuard/PermissionsGuard sama sekali tidak
+    // tersentuh oleh override ini.
+    .overrideProvider(ThrottlerStorage)
+    .useValue({
+      increment: () =>
+        Promise.resolve({
+          totalHits: 0,
+          timeToExpire: 0,
+          isBlocked: false,
+          timeToBlockExpire: 0,
+        }),
+    })
+    .compile();
 
   const app = moduleFixture.createNestApplication<NestExpressApplication>({
     bufferLogs: true,

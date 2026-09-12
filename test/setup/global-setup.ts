@@ -53,6 +53,15 @@ export default async function globalSetup(): Promise<void> {
   // dokumentasi Swagger tiap run E2E.
   process.env.ENABLE_SWAGGER = 'false';
   process.env.LOG_LEVEL = 'error';
+  // WAJIB false, bukan cuma pengurang noise: pino-pretty jalan lewat
+  // worker_thread Node (pino.transport()) yang TIDAK otomatis berhenti
+  // saat app.close() -- cuma berhenti kalau proses Node benar-benar
+  // exit. Tiap app instance E2E (satu per file *.e2e-spec.ts) spawn
+  // worker thread-nya sendiri; begitu ada >1 file test, sisa worker
+  // thread ini yang bikin Jest tidak exit bersih ("Jest did not exit
+  // one second after..."). JSON plain (tanpa transport) tidak spawn
+  // worker thread sama sekali.
+  process.env.LOG_PRETTY = 'false';
 
   // Migration dijalankan SEKALI di sini (bukan di dalam tiap test file)
   // supaya semua test file yang share container yang sama tidak lomba
