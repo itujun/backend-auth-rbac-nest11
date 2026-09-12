@@ -18,6 +18,13 @@ concurrency:
 env:
   NODE_VERSION: '22'
 
+# Catatan: actions/checkout & actions/setup-node dipakai di versi @v6
+# (bukan @v4) karena GitHub menghapus runtime Node20 dari semua runner
+# sekitar pertengahan-akhir September 2026 (lihat GitHub Changelog:
+# "Deprecation of Node20 on GitHub Actions runners"). @v4 masih jalan
+# di runtime Node20 secara internal dan berisiko berhenti berfungsi
+# begitu tanggal itu lewat -- bukan cuma soal warning kosmetik.
+
 jobs:
   # ---------------------------------------------------------------------
   # 1. Lint & Typecheck -- paling cepat gagal, jalan duluan (fail fast)
@@ -27,9 +34,9 @@ jobs:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -53,9 +60,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -65,22 +72,22 @@ jobs:
       - run: npm run test -- --ci
 
   # ---------------------------------------------------------------------
-  # 3. E2E test -- 51 test case, pakai Testcontainers (bikin container
-  #    Postgres sendiri via Docker API). TIDAK butuh services: block
-  #    tambahan apapun di sini -- runner ubuntu-latest bawaan GitHub
-  #    Actions sudah ada Docker daemon aktif, Testcontainers otomatis
-  #    pakai itu. Redis SENGAJA tidak dijalankan (lihat README bagian
-  #    "Testing E2E" -- fallback tanpa Redis adalah bagian yang
-  #    divalidasi, bukan kekurangan).
+  # 3. E2E test -- 35 test case (15 auth + 19 rbac + 1 health check),
+  #    pakai Testcontainers (bikin container Postgres sendiri via Docker
+  #    API). TIDAK butuh services: block tambahan apapun di sini --
+  #    runner ubuntu-latest bawaan GitHub Actions sudah ada Docker daemon
+  #    aktif, Testcontainers otomatis pakai itu. Redis SENGAJA tidak
+  #    dijalankan (lihat README bagian "Testing E2E" -- fallback tanpa
+  #    Redis adalah bagian yang divalidasi, bukan kekurangan).
   # ---------------------------------------------------------------------
   test-e2e:
     name: E2E Test
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -99,9 +106,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test-e2e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
