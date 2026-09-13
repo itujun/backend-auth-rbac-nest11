@@ -7,7 +7,7 @@
     "assets": [
       {
         "include": "modules/profiles/assets/**/*",
-        "outDir": "dist/src"
+        "outDir": "dist"
       }
     ]
   }

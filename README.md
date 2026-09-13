@@ -340,15 +340,52 @@ replica start bersamaan mencoba migrate barengan).
   `main.ts` benar-benar sempat jalan (graceful shutdown, tutup koneksi
   Postgres rapi) saat container di-stop/di-restart.
 
-> ⚠️ **Belum tervalidasi via `docker build` sungguhan** — dibuat &
-> direview manual line-by-line (termasuk cross-check langsung ke
-> `nest-cli.json`, `main.ts`, `env.validation.ts`, dan isi
-> `optionalDependencies` sharp yang ter-install), tapi environment yang
-> dipakai menulis ini tidak punya Docker daemon untuk build asli.
-> **Tolong jalankan `docker build` + `docker run` beneran sebelum
-> dipakai deploy**, terutama untuk verifikasi permission folder
-> `uploads` dan bahwa `HEALTHCHECK` benar-benar melaporkan status
-> `healthy`.
+### Bug yang Ketemu & Diperbaiki Saat Validasi Live
+
+✅ **Sudah divalidasi via `docker build` + `docker run` sungguhan**
+(13 Sep 2026) — sekaligus nemuin 1 bug nyata yang lolos dari review
+manual maupun 135 unit test + 35 E2E test sebelumnya:
+
+**Bug: asset avatar default "salah alamat" di dalam container**
+(`ENOENT: no such file or directory, copyfile
+'/app/dist/modules/profiles/assets/default-avatar.png'`).
+
+- **Akar masalah**: `drizzle.config.ts` ada di root project (konvensi
+  `drizzle-kit`, bukan di dalam `src/`). `tsconfig.build.json`
+  sebelumnya tidak punya `"include"` eksplisit, jadi TypeScript
+  meng-infer `rootDir` dari file terluas yang ikut ke-compile. Kalau
+  `drizzle.config.ts` (root) ikut ke-scan, `rootDir` melebar ke root
+  project → output `dist/src/main.js` (nested). Tapi di DALAM
+  Dockerfile, `drizzle.config.ts` SENGAJA tidak ikut ter-`COPY` (cuma
+  `src/` + 3 file config) → `rootDir` malah ke-infer `src/` → output
+  `dist/main.js` (flat). **Dua konteks build yang sama, hasil struktur
+  `dist/` beda-beda** — sementara `nest-cli.json` config asset avatar
+  hardcode `"outDir": "dist/src"`, cocok untuk skenario pertama tapi
+  SALAH untuk skenario kedua (yang justru dipakai Dockerfile).
+- **Kenapa lolos dari test manapun**: unit test & E2E test SEMUA jalan
+  lewat `ts-jest`/`@swc/jest` yang transpile langsung dari `src/`
+  in-memory — TIDAK PERNAH menyentuh `dist/` sama sekali. `npm run
+start:dev` juga jalan dari source langsung (`ts-node`/watch mode).
+  Cuma path production (`node dist/main` di dalam container) yang
+  benar-benar mengeksekusi kode HASIL COMPILE — makanya bug ini baru
+  ketahuan pas container production dijalankan sungguhan, bukan dari
+  build/test manapun sebelumnya.
+- **Fix**: tambah `"include": ["src/**/*"]` eksplisit di
+  `tsconfig.build.json` (supaya struktur `dist/` SELALU flat &
+  deterministik, tidak tergantung file `.ts` liar di luar `src/` ikut
+  ke-scan atau tidak) + perbaiki `nest-cli.json` asset `outDir` dari
+  `"dist/src"` jadi `"dist"` (mengikuti struktur flat yang sekarang
+  dijamin konsisten). Diverifikasi di DUA skenario (build penuh dengan
+  `drizzle.config.ts`, dan simulasi persis isi `COPY` Dockerfile tanpa
+  itu) — hasilnya sekarang identik: `dist/main.js` +
+  `dist/modules/profiles/assets/default-avatar.png`, saling cocok.
+
+Fix ini diverifikasi di DUA skenario build lokal (build penuh dengan
+`drizzle.config.ts`, dan simulasi persis isi `COPY` Dockerfile tanpa
+itu) — hasilnya sekarang identik: `dist/main.js` +
+`dist/modules/profiles/assets/default-avatar.png`, saling cocok. Belum
+divalidasi ulang via `docker build`+`docker run` sungguhan setelah fix
+ini — langkah itu ada di bagian **Build & Jalankan** di atas.
 
 ## Health Check
 
