@@ -380,12 +380,25 @@ start:dev` juga jalan dari source langsung (`ts-node`/watch mode).
   itu) — hasilnya sekarang identik: `dist/main.js` +
   `dist/modules/profiles/assets/default-avatar.png`, saling cocok.
 
-Fix ini diverifikasi di DUA skenario build lokal (build penuh dengan
-`drizzle.config.ts`, dan simulasi persis isi `COPY` Dockerfile tanpa
-itu) — hasilnya sekarang identik: `dist/main.js` +
-`dist/modules/profiles/assets/default-avatar.png`, saling cocok. Belum
-divalidasi ulang via `docker build`+`docker run` sungguhan setelah fix
-ini — langkah itu ada di bagian **Build & Jalankan** di atas.
+Setelah fix ini, `docker build` + `docker run` sungguhan (terhubung ke
+`rbac_postgres` & `rbac_redis` lewat network `rbac-backend_default`,
+`.env.production.local` diisi lengkap) **berhasil penuh** (13 Sep
+2026): `HEALTHCHECK` Docker melaporkan `"healthy"`, dan
+`curl http://localhost:3000/api/health` membalas:
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "data": {
+    "status": "ok",
+    "info": { "database": { "status": "up" }, "redis": { "status": "up" } }
+  }
+}
+```
+
+Dockerfile production ini sekarang **tervalidasi end-to-end secara
+nyata**, bukan cuma lewat review manual/static analysis.
 
 ## Health Check
 
