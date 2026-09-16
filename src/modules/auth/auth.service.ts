@@ -15,6 +15,7 @@ import {
   RequestMeta,
 } from './refresh-tokens/refresh-tokens.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { TelegramService } from '../telegram/telegram.service';
 
 @Injectable()
 export class AuthService {
@@ -24,6 +25,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly refreshTokensService: RefreshTokensService,
     private readonly auditLogService: AuditLogService,
+    private readonly telegramService: TelegramService,
   ) {}
 
   async register(dto: RegisterDto, meta: RequestMeta = {}) {
@@ -52,6 +54,21 @@ export class AuthService {
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     });
+
+    // Sama seperti audit log di atas: `notifyAdmin()` dijamin tidak
+    // pernah reject (lihat TelegramService), jadi aman di-`await` di
+    // sini tanpa risiko registrasi gagal gara-gara Telegram down.
+    // SENGAJA diletakkan setelah audit log tercatat, bukan sebelum --
+    // kalau ternyata harus dipilih urutan, audit trail (kepatuhan)
+    // lebih prioritas daripada notifikasi (kenyamanan).
+    await this.telegramService.notifyAdmin(
+      [
+        'Registrasi user baru',
+        `Email: ${user.email}`,
+        `User ID: ${user.id}`,
+        `Waktu: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`,
+      ].join('\n'),
+    );
 
     return this.usersService.sanitize(user);
   }

@@ -5,6 +5,7 @@ import { UsersService } from '../users/users.service';
 import { HashingService } from '../../core/hashing/hashing.service';
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
+import { TelegramService } from '../telegram/telegram.service';
 import type { User } from '../../database/schema';
 
 function fakeUser(overrides: Partial<User> = {}): User {
@@ -70,12 +71,18 @@ function createAuthService() {
   const recordMock = jest.fn().mockResolvedValue(undefined);
   const auditLogService = { record: recordMock } as unknown as AuditLogService;
 
+  const notifyAdminMock = jest.fn().mockResolvedValue(undefined);
+  const telegramService = {
+    notifyAdmin: notifyAdminMock,
+  } as unknown as TelegramService;
+
   const authService = new AuthService(
     usersService,
     hashingService,
     jwtService,
     refreshTokensService,
     auditLogService,
+    telegramService,
   );
 
   return {
@@ -89,6 +96,7 @@ function createAuthService() {
     signAsyncMock,
     issueMock,
     recordMock,
+    notifyAdminMock,
     rotateMock,
     revokeMock,
     revokeAllForUserMock,
@@ -118,6 +126,7 @@ describe('AuthService', () => {
         hashMock,
         createWithProfileMock,
         recordMock,
+        notifyAdminMock,
       } = createAuthService();
       findByEmailMock.mockResolvedValue(null);
       createWithProfileMock.mockResolvedValue(fakeUser());
@@ -139,6 +148,42 @@ describe('AuthService', () => {
       expect(recordMock).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'auth.register', actorUserId: 1 }),
       );
+      // Notifikasi Telegram harus terpanggil setelah user berhasil
+      // dibuat, dengan isi pesan yang menyebut email user baru.
+      expect(notifyAdminMock).toHaveBeenCalledTimes(1);
+      expect(notifyAdminMock).toHaveBeenCalledWith(
+        expect.stringContaining('budi@example.com'),
+      );
+    });
+
+    it('TIDAK membungkus notifyAdmin() dengan try-catch sendiri — bergantung penuh pada kontrak TelegramService yang tidak pernah reject', async () => {
+      // AuthService SENGAJA tidak menambah try-catch sendiri di sekitar
+      // notifyAdmin() (lihat komentar di auth.service.ts) -- ia percaya
+      // penuh pada jaminan TelegramService bahwa method itu tidak
+      // pernah reject. Test ini sebetulnya skenario yang TIDAK PERNAH
+      // terjadi pada implementasi TelegramService asli, tapi berguna
+      // sebagai regression guard: kalau suatu saat proteksi try-catch
+      // di TelegramService sengaja/tidak sengaja dihapus sehingga ia
+      // mulai bisa reject, kegagalan akan langsung kelihatan DI SINI
+      // (register() ikut gagal) -- sinyal jelas bahwa kontrak
+      // best-effort-nya rusak, alih-alih baru ketahuan diam-diam nanti
+      // saat Telegram API kebetulan down di production.
+      const {
+        authService,
+        findByEmailMock,
+        createWithProfileMock,
+        notifyAdminMock,
+      } = createAuthService();
+      findByEmailMock.mockResolvedValue(null);
+      createWithProfileMock.mockResolvedValue(fakeUser());
+      notifyAdminMock.mockRejectedValue(new Error('Telegram down'));
+
+      await expect(
+        authService.register({
+          email: 'budi@example.com',
+          password: 'password123',
+        }),
+      ).rejects.toThrow('Telegram down');
     });
   });
 

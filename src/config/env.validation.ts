@@ -39,6 +39,18 @@ export const envValidationSchema = Joi.object({
   R2_BUCKET_NAME: Joi.string().required(),
   R2_PUBLIC_URL: Joi.string().uri().required(),
 
+  // Telegram Bot API (notifikasi admin saat ada registrasi user baru).
+  // WAJIB diisi -- filosofinya SAMA dengan R2: kalau fitur ini memang
+  // dipakai di deployment ini, salah konfigurasi (token/chat ID kosong
+  // atau typo) harus ketahuan SAAT BOOT, bukan diam-diam gagal terus
+  // baru ketahuan pas ada yang komplain "kok gak ada notif masuk".
+  // CATATAN: ini beda level dengan TelegramService.notifyAdmin() yang
+  // best-effort di RUNTIME (lihat komentar di service-nya) -- fail-fast
+  // di sini cuma menjamin ENV-nya valid, bukan menjamin Telegram API
+  // akan selalu berhasil dipanggil.
+  TELEGRAM_BOT_TOKEN: Joi.string().required(),
+  TELEGRAM_ADMIN_CHAT_ID: Joi.string().required(),
+
   // Redis (cache-aside untuk permission checks, lihat AuthorizationService).
   // Semua opsional dengan default -- SENGAJA tidak `.required()`, karena
   // Redis di project ini murni optimasi, bukan dependency wajib untuk

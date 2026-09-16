@@ -50,6 +50,17 @@ export default () => ({
     // trailing slash.
     publicUrl: process.env.R2_PUBLIC_URL,
   },
+  telegram: {
+    // Token bot dari @BotFather. Bagian dari URL endpoint API
+    // (https://api.telegram.org/bot<TOKEN>/...), BUKAN header auth --
+    // lihat TelegramService untuk detail cara panggilnya.
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+    // Chat ID tujuan notifikasi (chat pribadi admin dengan bot ini).
+    // String, bukan number -- chat ID Telegram bisa sangat besar
+    // (di luar jangkauan aman JS number untuk grup/channel tertentu),
+    // dan kita toh cuma meneruskannya apa adanya ke Telegram API.
+    adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID,
+  },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),

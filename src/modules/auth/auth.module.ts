@@ -14,12 +14,14 @@ import { RefreshTokensRepository } from './refresh-tokens/refresh-tokens.reposit
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
 import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
 import { AuditLogModule } from '../audit-log/audit-log.module';
+import { TelegramModule } from '../telegram/telegram.module';
 
 @Module({
   imports: [
     UsersModule,
     HashingModule,
     AuditLogModule,
+    TelegramModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
