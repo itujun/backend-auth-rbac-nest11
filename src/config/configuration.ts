@@ -29,7 +29,26 @@ export default () => ({
     refreshTokenName: process.env.REFRESH_TOKEN_COOKIE_NAME ?? 'refresh_token',
   },
   storage: {
+    // Dipakai HANYA untuk default avatar (asset yang dibundel bersama
+    // source code, lihat AvatarStorageService.onModuleInit) -- bukan
+    // untuk avatar upload user, yang sejak migrasi R2 disimpan di object
+    // storage, bukan filesystem container.
     uploadDir: process.env.UPLOAD_DIR ?? 'uploads',
+  },
+  r2: {
+    // Membentuk endpoint API S3-compatible R2: https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+    // "auto" WAJIB untuk region -- bukan dipakai R2 untuk routing (R2
+    // tidak punya konsep region seperti AWS), tapi field ini tetap
+    // diwajibkan oleh AWS SDK S3Client secara struktural.
+    accountId: process.env.R2_ACCOUNT_ID,
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    bucketName: process.env.R2_BUCKET_NAME,
+    // URL publik untuk MEMBACA object (r2.dev subdomain atau custom
+    // domain yang di-attach ke bucket) -- BEDA dari endpoint API di atas
+    // yang dipakai untuk PutObject/DeleteObject via S3 client. Tanpa
+    // trailing slash.
+    publicUrl: process.env.R2_PUBLIC_URL,
   },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',

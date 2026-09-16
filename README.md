@@ -106,8 +106,11 @@ avatar disajikan sebagai static file) — detail lengkap ada di komentar
 - `contentSecurityPolicy` dimatikan HANYA saat Swagger aktif (CSP default
   akan bikin halaman `/api/docs` blank).
 - `crossOriginResourcePolicy` di-set `cross-origin` supaya frontend di
-  origin lain (mis. `localhost:5173`) bisa menampilkan `<img>` avatar dari
-  `/uploads/...`.
+  origin lain (mis. `localhost:5173`) bisa menampilkan `<img>` default
+  avatar dari `/uploads/...`. **Cuma relevan untuk default avatar** —
+  avatar upload user disajikan langsung dari domain Cloudflare R2 (lihat
+  section "Migrasi Avatar ke Cloudflare R2"), jadi tunduk ke header CORS
+  R2 sendiri, bukan setting Helmet di app ini.
 
 **Rate limiting** (`@nestjs/throttler`) — dua lapis:
 
@@ -286,18 +289,27 @@ docker run -d \
   -e DATABASE_URL="postgres://user:pass@host:5432/rbac_db" \
   -e JWT_ACCESS_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")" \
   -e CORS_ORIGIN="https://app-frontend-kamu.com" \
-  -v rbac_uploads:/app/uploads \
+  -e R2_ACCOUNT_ID="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -e R2_ACCESS_KEY_ID="xxxxxxxxxxxxxxxxxxxx" \
+  -e R2_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
+  -e R2_BUCKET_NAME="rbac-avatars" \
+  -e R2_PUBLIC_URL="https://pub-xxxxxxxxxxxx.r2.dev" \
   rbac-backend:latest
 ```
 
-Cuma **`DATABASE_URL`** dan **`JWT_ACCESS_SECRET`** yang wajib diisi
-(lihat `env.validation.ts`) — sisanya (Redis, CORS, rate limit, dst)
-punya default yang masuk akal, lihat `.env.example` untuk daftar
-lengkap + penjelasan tiap variabel.
+**Wajib diisi**: `DATABASE_URL`, `JWT_ACCESS_SECRET`, dan sejak migrasi
+avatar ke Cloudflare R2, kelima variabel `R2_*` di atas juga wajib
+(lihat `env.validation.ts` — boot langsung gagal fail-fast kalau kosong,
+bukan baru error 500 saat user pertama kali upload avatar). Sisanya
+(Redis, CORS, rate limit, dst) punya default yang masuk akal, lihat
+`.env.example` untuk daftar lengkap + penjelasan tiap variabel.
 
-**Volume `/app/uploads` sengaja di-mount terpisah** — tanpa ini, avatar
-yang di-upload user akan hilang setiap kali container di-recreate
-(deploy baru = image baru = layer baru = folder ini kembali kosong).
+**Volume `/app/uploads` TIDAK PERLU LAGI di-mount** (beda dari versi
+sebelum migrasi R2). Folder itu sekarang cuma berisi default avatar yang
+ikut ter-bundle di image (di-regenerasi otomatis tiap start kalau belum
+ada) — avatar upload user disimpan di Cloudflare R2, jadi persistence-nya
+sudah ditangani di luar container sama sekali, terlepas dari siklus hidup
+container itu sendiri.
 
 ### Migration Database — SENGAJA Tidak Otomatis di Container
 
@@ -399,6 +411,69 @@ Setelah fix ini, `docker build` + `docker run` sungguhan (terhubung ke
 
 Dockerfile production ini sekarang **tervalidasi end-to-end secara
 nyata**, bukan cuma lewat review manual/static analysis.
+
+## Migrasi Avatar ke Cloudflare R2
+
+**Kenapa avatar upload user tidak lagi disimpan di filesystem container:**
+container Docker bersifat _ephemeral_ — writable layer-nya hilang total
+setiap kali container di-recreate (deploy baru, restart karena crash,
+dst). Bahkan kalau di-mount sebagai volume, itu cuma menyelesaikan
+masalah "hilang saat container di-recreate", TAPI volume itu tetap
+terikat ke satu Docker host — begitu aplikasi di-scale ke 2+ instance
+(load balancing) atau pindah host, file yang diupload lewat instance A
+tidak bisa diakses instance B. Ini melanggar prinsip _stateless
+container_ yang jadi dasar containerization modern.
+
+**Kenapa Cloudflare R2, bukan self-host (MinIO/SeaweedFS/Garage):**
+MinIO Community Edition — pilihan self-host paling populer secara
+historis — sudah masuk _maintenance mode_ sejak Desember 2025 dan repo
+GitHub-nya di-_archive_ (read-only, tanpa patch keamanan lagi) per April
+2026, jadi bukan pilihan yang bijak untuk proyek baru. Alternatif
+self-host generasi baru (SeaweedFS, Garage) masih aktif dikembangkan,
+tapi menambah _operational burden_ (backup, monitoring disk, update
+versi) yang tidak sepadan untuk proyek portofolio individu. R2 dipilih
+karena: **managed** (tidak perlu urus server storage sendiri),
+**S3-compatible** (pakai SDK & mental model S3 yang sudah umum
+dikenal — abstraksi `AvatarStorageService` tidak perlu tahu bedanya
+sama sekali), dan **egress bandwidth gratis** (beda dari AWS S3 yang
+charge tiap kali avatar diakses browser — penghematan nyata untuk
+endpoint yang sering diakses).
+
+**Yang TIDAK ikut pindah ke R2:** default avatar. Dia bagian dari kode
+yang di-bundle ke image Docker (lihat penjelasan `nest-cli.json` assets
+di section "Bug: asset avatar default 'salah alamat' di dalam container"
+di atas), bukan data yang di-generate user saat runtime —
+jadi tidak punya masalah persistence yang jadi alasan migrasi ini sama
+sekali. Tetap disajikan sebagai static file lokal di
+`/uploads/avatars/default.png`.
+
+**Setup Cloudflare R2** (sekali saja, di Cloudflare Dashboard):
+
+1. R2 Object Storage → Create bucket (mis. `rbac-avatars`)
+2. Buka bucket → Settings → Public Access → aktifkan **R2.dev
+   subdomain** → catat URL yang di-generate (jadi `R2_PUBLIC_URL`)
+3. Catat **Account ID** (sidebar kanan halaman utama R2) — dipakai
+   membentuk endpoint API `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`
+4. "Manage R2 API Tokens" → Create API Token, permission **Object Read
+   & Write**, scope dibatasi ke bucket ini saja (prinsip least
+   privilege) → catat Access Key ID & Secret Access Key (Secret cuma
+   ditampilkan sekali)
+
+Isi kelima nilai itu ke `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL` di `.env` —
+lihat `.env.example` untuk detail tiap variabel. Kelimanya wajib diisi
+(`env.validation.ts`), aplikasi gagal start kalau kosong — sengaja
+fail-fast di boot time, bukan baru error 500 saat user pertama kali
+upload avatar.
+
+**Catatan kompatibilitas AWS SDK v3 + R2:** sejak versi `3.729`, AWS SDK
+JS v3 mengaktifkan default checksum CRC32 di setiap `PutObject`/
+`UploadPart`, yang belum didukung penuh oleh sebagian versi/endpoint R2
+(gejalanya: error header `x-amz-checksum-crc32 ... not implemented`).
+Di-_workaround_ dengan set `requestChecksumCalculation` &
+`responseChecksumValidation` ke `'WHEN_REQUIRED'` saat inisialisasi
+`S3Client` — mengembalikan ke perilaku lama (checksum cuma dihitung
+kalau operasi API benar-benar mewajibkannya).
 
 ## Health Check
 
@@ -668,23 +743,32 @@ src/
   role/permission pertama tanpa lewat API (chicken-and-egg problem).
   `npm run db:seed` membuat baseline permission + role `superadmin`,
   dan bisa meng-assign-nya ke user tertentu lewat env `SEED_ADMIN_EMAIL`.
-- **Avatar diproses di memory, ditulis ke disk sekali**: upload avatar
+- **Avatar diproses di memory, diupload sekali ke R2**: upload avatar
   pakai `multer` dengan `memoryStorage()` (bukan simpan file mentah ke
   disk dulu) — buffer langsung diproses `sharp` (resize 512×512 +
-  convert ke WebP kualitas 80) baru ditulis final ke disk. Hasilnya:
+  convert ke WebP kualitas 80) baru diupload final ke Cloudflare R2
+  (object storage, **bukan** disk container — lihat bagian "Migrasi
+  Avatar ke Cloudflare R2" di bawah untuk alasan lengkapnya). Hasilnya:
   kompresi signifikan (contoh nyata saat testing: JPEG 8.7KB jadi
   WebP 554 byte, ~94% lebih kecil) dan format seragam apapun input-nya
   (JPEG/PNG/WebP).
-- **File avatar lama otomatis dihapus** setiap kali avatar diganti
-  atau direset ke default — mencegah file sampah menumpuk di disk.
-  Default avatar sendiri TIDAK PERNAH ikut terhapus (dicek eksplisit
-  lewat pencocokan URL di `AvatarStorageService.deleteIfCustom()`).
-- **Default avatar dibundel sebagai asset**, bukan cuma string path di
-  DB — `nest-cli.json` dikonfigurasi untuk ikut meng-copy
+- **Avatar lama otomatis dihapus dari R2** setiap kali avatar diganti
+  atau direset ke default — mencegah object sampah menumpuk di bucket
+  (dan menumpuk biaya storage). Default avatar sendiri TIDAK PERNAH ikut
+  terhapus (dicek eksplisit lewat pencocokan URL di
+  `AvatarStorageService.deleteIfCustom()`), begitu juga URL yang bukan
+  berasal dari bucket R2 yang kita kelola (data lama sebelum migrasi,
+  atau nilai yang di-tamper) — sengaja dilewati, bukan dipaksa dihapus.
+- **Default avatar dibundel sebagai asset DAN tetap di filesystem lokal**
+  (satu-satunya bagian dari sistem avatar yang TIDAK ikut pindah ke R2)
+  — `nest-cli.json` dikonfigurasi untuk ikut meng-copy
   `default-avatar.png` ke `dist/` saat build, lalu `AvatarStorageService`
-  meng-copy-nya ke folder `uploads/avatars/` saat aplikasi start
-  (kalau belum ada). Jadi endpoint `/uploads/avatars/default.png`
-  selalu bisa diakses sejak first boot, tanpa perlu upload manual.
+  meng-copy-nya ke folder `uploads/avatars/` saat aplikasi start (kalau
+  belum ada). Alasannya: dia bagian dari kode yang di-bundle ke image
+  Docker, bukan data yang di-generate user saat runtime, jadi tidak
+  punya masalah persistence yang jadi alasan avatar upload user
+  dipindah ke R2. Jadi endpoint `/uploads/avatars/default.png` selalu
+  bisa diakses sejak first boot, tanpa perlu upload manual.
 - **`profile:read`/`profile:update` sebagai contoh integrasi RBAC lintas
   modul**: endpoint admin `GET/PATCH /profiles/:userId` dilindungi
   `@RequirePermission`, membuktikan pola yang sama dari Phase 3 bisa
@@ -960,8 +1044,11 @@ curl -X POST http://localhost:3000/api/profile/me/avatar \
 curl -X DELETE http://localhost:3000/api/profile/me/avatar \
   -H "Authorization: Bearer <accessToken>"
 
-# Akses gambar avatar langsung (URL didapat dari response di atas)
-curl http://localhost:3000/uploads/avatars/user-3-xxxx.webp -o avatar.webp
+# Akses gambar avatar langsung (URL didapat dari response di atas).
+# Avatar upload user disajikan dari domain Cloudflare R2 (R2_PUBLIC_URL),
+# BUKAN dari endpoint app ini -- kecuali avatar masih default, yang
+# tetap disajikan dari /uploads/avatars/default.png di app.
+curl https://pub-xxxxxxxxxxxx.r2.dev/avatars/user-3-xxxx.webp -o avatar.webp
 ```
 
 ## API Endpoints (Phase 5 — List Features)
@@ -1123,18 +1210,18 @@ curl -X POST http://localhost:3000/api/permissions \
         otomatis (tidak perlu setup manual).
 
         **Kalau mau lihat log app KAMU SENDIRI di Grafana** (bukan
-                        cuma Postgres/Redis): app yang jalan host-mode
-                        (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
-                        cuma bisa lihat container Docker). Matikan dulu
-                        `npm run start:dev`, lalu:
-                        `docker compose --profile full up -d --build app` — ini
-                        menjalankan app di container dev (`Dockerfile.dev`, BUKAN
-                        Dockerfile production — itu roadmap terpisah) khusus untuk
-                        keperluan demo/verifikasi pipeline observability ini.
+                            cuma Postgres/Redis): app yang jalan host-mode
+                            (`npm run start:dev`) TIDAK terlihat Alloy sama sekali (Alloy
+                            cuma bisa lihat container Docker). Matikan dulu
+                            `npm run start:dev`, lalu:
+                            `docker compose --profile full up -d --build app` — ini
+                            menjalankan app di container dev (`Dockerfile.dev`, BUKAN
+                            Dockerfile production — itu roadmap terpisah) khusus untuk
+                            keperluan demo/verifikasi pipeline observability ini.
 
-                        Contoh query LogQL di Grafana Explore:
-                        `{container="rbac_app"} | json | level="error"` (semua error
-                        dari app).
+                            Contoh query LogQL di Grafana Explore:
+                            `{container="rbac_app"} | json | level="error"` (semua error
+                            dari app).
 
   - [x] Health check proper (`@nestjs/terminus`) — `GET /api/health` sekarang benar-benar cek koneksi Postgres (custom `DrizzleHealthIndicator`, karena Terminus tidak punya indicator bawaan untuk Drizzle), balas 503 kalau DB down, bukan cuma "aplikasi hidup". Bonus: `app.enableShutdownHooks()` diaktifkan sekaligus membenahi bug dorman di `DatabaseModule` (pool Postgres dulu tidak pernah benar-benar ditutup saat shutdown).
   - [x] Redis caching (permission checks) — cache-aside pada
@@ -1191,4 +1278,20 @@ curl -X POST http://localhost:3000/api/permissions \
         (bukan cuma "proses hidup"). Detail cara build/run & keputusan
         desain lengkap di section **Build & Run Production Image** di
         atas.
+  - [x] Migrasi avatar ke Cloudflare R2 — avatar upload user pindah dari
+        filesystem lokal container ke object storage S3-compatible
+        (`@aws-sdk/client-s3`). Alasan & keputusan desain lengkap (kenapa
+        R2 dipilih ketimbang self-host MinIO/SeaweedFS/Garage, kenapa
+        default avatar TIDAK ikut pindah) ada di section **Migrasi
+        Avatar ke Cloudflare R2** di atas. Kontrak
+        `AvatarStorageService` (`saveAvatar`/`deleteIfCustom`) tidak
+        berubah, jadi `ProfilesService` & pemanggil lain tidak perlu
+        disentuh sama sekali.
+  - [ ] Notifikasi Telegram ke admin saat ada user baru registrasi — HTTP
+        call `sendMessage` langsung (tanpa bot library terpisah),
+        `chatId` admin disimpan di env.
+  - [ ] Telegram 2FA untuk perubahan nomor telepon — scope lebih besar:
+        field baru `telegramChatId` (terpisah dari nomor telepon), flow
+        account linking, sistem OTP dimodelkan mirip refresh token
+        (di-hash, TTL, rate-limited).
 - [ ] **Phase 7 — Frontend Svelte** (simulasi UI untuk testing manual seluruh fitur backend)

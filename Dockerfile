@@ -66,16 +66,17 @@ COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
 
-# Folder upload avatar HARUS sudah ada & writable SEBELUM app start --
-# AvatarStorageService.onModuleInit() memang bikin folder ini sendiri
-# (mkdir recursive), tapi kalau WORKDIR /app dimiliki root sementara
-# proses jalan sebagai user `node`, mkdir itu akan gagal permission
-# denied. Dibuat & di-chown di sini, SEBELUM `USER node` di bawah.
+# Folder ini SEKARANG HANYA untuk default avatar (asset bundled, di-copy
+# oleh AvatarStorageService.onModuleInit saat start) -- avatar upload
+# user sejak migrasi ke Cloudflare R2 TIDAK LAGI ditulis ke sini sama
+# sekali. Tetap harus ada & writable sebelum app start karena mkdir
+# recursive di onModuleInit() akan gagal permission denied kalau WORKDIR
+# masih dimiliki root sementara proses jalan sebagai user `node`.
 #
-# CATATAN PERSISTENCE: folder ini idealnya di-mount sebagai volume
-# terpisah saat `docker run`/compose (mis. `-v rbac_uploads:/app/uploads`)
-# supaya avatar yang di-upload TIDAK hilang tiap kali container
-# di-recreate (image baru = layer baru = isi folder ini kembali kosong).
+# CATATAN PERSISTENCE: BERBEDA dari sebelum migrasi R2 -- folder ini
+# TIDAK PERLU LAGI di-mount sebagai volume terpisah. Isinya cuma default
+# avatar yang ikut ter-bundle di image (regenerasi otomatis tiap start
+# kalau belum ada), bukan data user yang perlu persist.
 RUN mkdir -p uploads/avatars && chown -R node:node uploads
 
 USER node

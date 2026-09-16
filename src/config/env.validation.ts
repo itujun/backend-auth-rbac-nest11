@@ -25,8 +25,19 @@ export const envValidationSchema = Joi.object({
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
   REFRESH_TOKEN_COOKIE_NAME: Joi.string().default('refresh_token'),
 
-  // Storage (upload avatar)
+  // Storage -- default avatar (bundled asset) saja, BUKAN avatar upload user
   UPLOAD_DIR: Joi.string().default('uploads'),
+
+  // Cloudflare R2 (object storage untuk avatar upload user). WAJIB diisi
+  // -- beda filosofi dengan Redis di bawah: tanpa R2 aplikasi TIDAK BISA
+  // menjalankan fitur upload/reset avatar sama sekali (bukan sekadar
+  // optimasi opsional), jadi harus fail-fast di boot time, bukan baru
+  // error 500 saat user pertama kali upload.
+  R2_ACCOUNT_ID: Joi.string().required(),
+  R2_ACCESS_KEY_ID: Joi.string().required(),
+  R2_SECRET_ACCESS_KEY: Joi.string().required(),
+  R2_BUCKET_NAME: Joi.string().required(),
+  R2_PUBLIC_URL: Joi.string().uri().required(),
 
   // Redis (cache-aside untuk permission checks, lihat AuthorizationService).
   // Semua opsional dengan default -- SENGAJA tidak `.required()`, karena
