@@ -10,6 +10,7 @@ import { AppModule } from '../../src/app.module';
 import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.filter';
 import { ResponseInterceptor } from '../../src/common/interceptors/response.interceptor';
 import { REDIS_CLIENT } from '../../src/core/redis/redis.constants';
+import { TelegramService } from '../../src/modules/telegram/telegram.service';
 
 /**
  * Bootstrap Nest app untuk E2E test dengan pipe/filter/interceptor SAMA
@@ -55,6 +56,20 @@ export async function createTestApp(): Promise<INestApplication> {
           isBlocked: false,
           timeToBlockExpire: 0,
         }),
+    })
+    // AuthService.register() (dipanggil sungguhan oleh auth.e2e-spec.ts)
+    // memanggil TelegramService.notifyAdmin() -- di-mock di sini supaya
+    // E2E TIDAK melakukan HTTP call sungguhan ke api.telegram.org.
+    // BEDA filosofi dengan Redis (yang sengaja DIBIARKAN gagal connect,
+    // karena fallback-nya justru yang mau divalidasi): di sini tidak
+    // ada assertion apapun yang menguji perilaku Telegram, jadi network
+    // call sungguhan ke pihak ketiga cuma menambah risiko flaky/lambat
+    // tanpa nilai tes sama sekali. TELEGRAM_BOT_TOKEN/TELEGRAM_ADMIN_CHAT_ID
+    // di global-setup.ts tetap perlu dummy value (untuk lolos validasi
+    // Joi saat boot), tapi effect-nya sudah dipotong total di sini.
+    .overrideProvider(TelegramService)
+    .useValue({
+      notifyAdmin: jest.fn().mockResolvedValue(undefined),
     })
     .compile();
 

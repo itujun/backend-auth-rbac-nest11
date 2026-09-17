@@ -40,6 +40,32 @@ export default async function globalSetup(): Promise<void> {
   process.env.JWT_ACCESS_SECRET =
     'e2e_test_secret_do_not_use_in_production_1234567890';
 
+  // R2 (object storage avatar) -- WAJIB diisi supaya lolos validasi Joi
+  // di env.validation.ts (fail-fast), TAPI nilainya sengaja PALSU/dummy.
+  // Aman: tidak ada test E2E saat ini yang benar-benar memanggil endpoint
+  // upload/reset avatar (AvatarStorageService.onModuleInit() cuma copy
+  // file avatar default ke disk lokal, TIDAK memanggil R2 API; S3Client
+  // sendiri juga tidak melakukan network call apapun cuma dari
+  // diinstansiasi -- AWS SDK v3 selalu lazy, baru benar-benar connect
+  // saat command dikirim).
+  process.env.R2_ACCOUNT_ID = 'e2e-dummy-account-id';
+  process.env.R2_ACCESS_KEY_ID = 'e2e-dummy-access-key-id';
+  process.env.R2_SECRET_ACCESS_KEY = 'e2e-dummy-secret-access-key';
+  process.env.R2_BUCKET_NAME = 'e2e-dummy-bucket';
+  process.env.R2_PUBLIC_URL = 'https://e2e-dummy.example.com';
+
+  // Telegram -- WAJIB diisi untuk lolos validasi Joi yang sama, dengan
+  // alasan yang SAMA seperti R2 di atas (dummy value, bukan real
+  // credential). BEDA dengan R2: AuthService.register() (yang DIPANGGIL
+  // beneran oleh test di auth.e2e-spec.ts) memang memanggil
+  // TelegramService.notifyAdmin() -- tapi provider ini di-override jadi
+  // mock di createTestApp() (lihat komentar di sana), jadi walau
+  // env-nya cuma dummy, tidak akan ada HTTP call sungguhan ke
+  // api.telegram.org selama E2E run. Nilai di sini murni untuk lolos
+  // validasi Joi saat boot, bukan untuk benar-benar dipakai.
+  process.env.TELEGRAM_BOT_TOKEN = 'e2e-dummy-bot-token';
+  process.env.TELEGRAM_ADMIN_CHAT_ID = 'e2e-dummy-chat-id';
+
   // Redis SENGAJA TIDAK di-container-kan untuk E2E -- lihat komentar
   // filosofi di RedisModule (cache-aside, bukan source of truth).
   // REDIS_HOST tetap default 'localhost' dari env.validation.ts, yang di
