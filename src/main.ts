@@ -63,7 +63,7 @@ async function bootstrap() {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: configService.get<string>('app.corsOrigin'),
+    origin: configService.get<string[]>('app.corsOrigin'),
     credentials: true, // wajib untuk kirim/terima httpOnly cookie (refresh token)
     // Tanpa ini, browser DIAM-DIAM MENYEMBUNYIKAN header `X-Request-Id`
     // dari `fetch()`/`XMLHttpRequest` di frontend (default CORS cuma

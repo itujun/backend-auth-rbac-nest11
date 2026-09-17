@@ -63,6 +63,10 @@ export const envValidationSchema = Joi.object({
   REDIS_PERMISSIONS_TTL_SECONDS: Joi.number().integer().positive().default(300),
 
   // CORS
+  // Comma-separated untuk >1 origin (mis. dev + E2E test) -- di-parse
+  // jadi array di configuration.ts. Tetap Joi.string() di sini karena
+  // env var mentahnya memang selalu satu string, splitting terjadi
+  // setelahnya, bukan di layer validasi ini.
   CORS_ORIGIN: Joi.string().default('http://localhost:5173'),
 
   // Swagger — opsional, default mengikuti NODE_ENV (lihat configuration.ts)

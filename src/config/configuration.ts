@@ -7,7 +7,19 @@ export default () => ({
   app: {
     env: process.env.NODE_ENV ?? 'development',
     port: parseInt(process.env.PORT ?? '3000', 10),
-    corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
+    // Comma-separated di env (mis. "http://localhost:5173,http://localhost:4000")
+    // -> array of string. `enableCors()` di main.ts menerima array langsung
+    // (didukung resmi oleh package `cors` di baliknya) -- BUKAN wildcard "*",
+    // tetap whitelist eksplisit, cuma boleh lebih dari satu entry sekarang.
+    // Kenapa ini perlu: dev server (5173) dan E2E Playwright yang nge-test
+    // build production (4000) itu DUA origin yang SAH secara bersamaan --
+    // beda kebutuhan, jangan dipaksa pakai port yang sama (bisa collision
+    // atau, lebih parah, Playwright diam-diam "reuse" dev server yang
+    // sedang jalan alih-alih benar-benar test build production).
+    corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
     // Default: aktif di semua environment SELAIN production. Di production
     // tetap bisa dipaksa aktif via ENABLE_SWAGGER=true kalau memang perlu
     // (mis. portofolio yang sengaja dipamerkan publik) — tapi sadari
