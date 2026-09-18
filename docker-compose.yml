@@ -69,16 +69,16 @@ services:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/ready || exit 1']
       interval: 10s
       timeout: 5s
-      retries: 5
-      # Masa tenggang sebelum kegagalan healthcheck mulai dihitung.
-      # Tanpa ini, saat banyak container cold-start bersamaan (CPU/disk
-      # kontensi tinggi), Loki bisa dianggap "belum sehat" tepat di
-      # momen alloy/grafana coba start (keduanya depends_on
-      # service_healthy), padahal Loki cuma butuh beberapa detik lagi.
-      # Sudah pernah terjadi persis begini saat live-testing: alloy &
-      # grafana gagal start bareng grup, harus di-start manual satu-
-      # satu setelah Loki keburu sehat duluan.
-      start_period: 15s
+      # retries naik 5 -> 8, start_period naik 15s -> 30s -- total budget
+      # sebelum ditandai "unhealthy" jadi ~30s + (8x10s) = 110s (sebelumnya
+      # cuma ~65s). Angka 65s ternyata mepet/kurang -- terbukti dari run
+      # kedua yang butuh 57.2s dan nyaris gagal. Dilonggarkan untuk
+      # mengakomodasi startup bersamaan dengan app (TS watch-compile) dan
+      # frontend (npm ci + vite build pertama kali), bukan karena loki
+      # rusak -- err="empty ring" di log itu cuma noise Loki, sudah
+      # dikonfirmasi tidak menggagalkan service (lihat diskusi sebelumnya).
+      retries: 8
+      start_period: 30s
 
   # Alloy butuh akses Docker socket HOST (read-only) untuk bisa
   # menemukan & membaca log container lain -- lihat penjelasan lengkap
@@ -96,8 +96,6 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
     ports:
-      # UI debug Alloy (lihat status pipeline, komponen mana yang
-      # error, dst) -- bukan untuk log kamu sendiri, itu di Grafana.
       - '12345:12345'
     depends_on:
       loki:
@@ -117,10 +115,6 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - rbac_grafanadata:/var/lib/grafana
     environment:
-      # Login anonim SEBAGAI ADMIN -- HANYA masuk akal untuk dev lokal
-      # di laptop sendiri (bukan diekspos ke jaringan/internet). Untuk
-      # deployment yang benar-benar dipakai tim/publik, WAJIB matikan
-      # ini dan pakai autentikasi Grafana yang semestinya.
       GF_AUTH_ANONYMOUS_ENABLED: 'true'
       GF_AUTH_ANONYMOUS_ORG_ROLE: 'Admin'
       GF_AUTH_DISABLE_LOGIN_FORM: 'true'
@@ -133,14 +127,6 @@ services:
   # `--profile full` eksplisit) -- workflow harian tetap
   # `npm run start:dev` di host seperti biasa (lebih cepat, tanpa
   # lapisan container).
-  #
-  # Kenapa perlu container terpisah sama sekali: Alloy CUMA bisa
-  # menemukan & membaca log lewat Docker socket -- App yang jalan
-  # langsung di host (`npm run start:dev`) TIDAK PERNAH terlihat oleh
-  # Alloy sama sekali, walau log-nya sendiri sudah benar (JSON ke
-  # stdout, lihat logger.config.ts). Tanpa service ini, Loki cuma akan
-  # berisi log Postgres/Redis/Loki/Alloy/Grafana sendiri -- BUKAN log
-  # request API yang sebenarnya paling ingin kamu lacak.
   app:
     profiles: ['full']
     build:
@@ -153,26 +139,59 @@ services:
     env_file:
       - .env
     environment:
-      # Override HANYA hostname koneksi -- di dalam network Docker
-      # Compose, service lain dipanggil lewat NAMA SERVICE ("postgres",
-      # "redis"), bukan "localhost" (yang di dalam container merujuk ke
-      # container itu sendiri, bukan host). Variabel lain (JWT secret,
-      # dst) tetap ikut dari `.env` lewat `env_file` di atas.
       DATABASE_URL: postgres://rbac_user:rbac_password@postgres:5432/rbac_db
       REDIS_HOST: redis
     volumes:
       - .:/app
-      # Anonymous volume ini SENGAJA "menimpa" bind mount di atas KHUSUS
-      # untuk folder node_modules -- kalau tidak, node_modules dari HOST
-      # (mis. hasil compile native addon `argon2`/`sharp` untuk
-      # macOS/Windows) akan menimpa node_modules Linux yang baru di-
-      # `npm ci` di dalam container saat build, dan native addon-nya
-      # akan CRASH (binary utk OS yang salah).
       - /app/node_modules
+    # Endpoint & pola SAMA PERSIS dengan `HEALTHCHECK` di Dockerfile
+    # production BE (`/api/health`, `wget`, `start_period: 15s`) --
+    # sengaja disamakan, bukan kebetulan. `wget` dipakai (bukan `curl`)
+    # karena itu yang tersedia bawaan di image Alpine (BusyBox); Node
+    # image resmi tidak menginstal `curl` secara default.
+    #
+    # `start_period: 15s` (bukan lebih pendek) -- `Dockerfile.dev` full
+    # `npm ci` + `start:dev` (watch mode ts-node/webpack) butuh waktu
+    # cold-start lebih lama dari image production yang sudah di-compile
+    # duluan saat `docker build`, jadi start_period-nya disamakan dengan
+    # yang production pakai, bukan dipersingkat.
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+
+  # FE dijalankan sebagai container OPSIONAL, sama seperti `app` (BE) di
+  # atas -- profile 'full', BUKAN workflow harian. `context` relatif ke
+  # folder SIBLING `frontend-auth-rbac-svelte5/`, SATU LEVEL di atas repo
+  # BE ini (../) -- valid selama kedua repo tetap bersebelahan seperti
+  # struktur saat ini.
+  frontend:
+    profiles: ['full']
+    build:
+      context: ../frontend-auth-rbac-svelte5
+      dockerfile: Dockerfile
+    container_name: rbac_frontend
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    environment:
+      # WAJIB tetap "http://localhost:3000" (host-reachable), BUKAN nama
+      # service Docker "app" -- browser pengguna jalan di HOST, bukan di
+      # dalam network Docker Compose, jadi tidak bisa resolve nama
+      # service "app" sama sekali. Lihat src/lib/api/client.ts.
+      PUBLIC_API_BASE_URL: http://localhost:3000/api
+    depends_on:
+      # Sekarang bisa pakai service_healthy, bukan cuma service_started
+      # -- `app` di atas sudah punya healthcheck sendiri.
+      app:
         condition: service_healthy
 
 volumes:
