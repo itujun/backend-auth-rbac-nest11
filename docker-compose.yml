@@ -65,20 +65,29 @@ services:
       - ./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro
       - rbac_lokidata:/loki
     command: -config.file=/etc/loki/local-config.yaml
+    # GANTI dari wget/CMD-SHELL -- base image Loki sejak v3.6.0 distroless,
+    # tidak ada /bin/sh maupun wget/curl sama sekali (bukan resource
+    # contention seperti dugaan awal, terbukti dari docker inspect:
+    # "exec: /bin/sh: stat /bin/sh: no such file or directory" di SETIAP
+    # percobaan, gagal instan <1 detik -- bukan gagal karena timeout).
+    # Fix resmi dari tim Grafana (github.com/grafana/loki#20149, PR #20590):
+    # flag CLI `-health` di binary loki sendiri, dirancang khusus untuk
+    # kasus ini -- cek /ready via native Go, tanpa butuh shell/tool
+    # eksternal. CMD (exec array, BUKAN CMD-SHELL) -- justru sekarang
+    # WAJIB exec-form karena memang tidak ada shell untuk interpret
+    # CMD-SHELL string.
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:3100/ready || exit 1']
+      test:
+        [
+          'CMD',
+          '/usr/bin/loki',
+          '-health',
+          '-health.url=http://localhost:3100/ready',
+        ]
       interval: 10s
       timeout: 5s
-      # retries naik 5 -> 8, start_period naik 15s -> 30s -- total budget
-      # sebelum ditandai "unhealthy" jadi ~30s + (8x10s) = 110s (sebelumnya
-      # cuma ~65s). Angka 65s ternyata mepet/kurang -- terbukti dari run
-      # kedua yang butuh 57.2s dan nyaris gagal. Dilonggarkan untuk
-      # mengakomodasi startup bersamaan dengan app (TS watch-compile) dan
-      # frontend (npm ci + vite build pertama kali), bukan karena loki
-      # rusak -- err="empty ring" di log itu cuma noise Loki, sudah
-      # dikonfirmasi tidak menggagalkan service (lihat diskusi sebelumnya).
-      retries: 8
-      start_period: 30s
+      retries: 5
+      start_period: 15s
 
   # Alloy butuh akses Docker socket HOST (read-only) untuk bisa
   # menemukan & membaca log container lain -- lihat penjelasan lengkap
@@ -181,7 +190,7 @@ services:
     container_name: rbac_frontend
     restart: unless-stopped
     ports:
-      - '3001:3000'
+      - '5173:3000'
     environment:
       # WAJIB tetap "http://localhost:3000" (host-reachable), BUKAN nama
       # service Docker "app" -- browser pengguna jalan di HOST, bukan di
