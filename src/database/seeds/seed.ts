@@ -58,6 +58,10 @@ const BASELINE_PERMISSIONS: Array<{ name: string; description: string }> = [
     name: 'profile:update',
     description: 'Mengubah profile user lain (admin)',
   },
+  {
+    name: 'audit_log:read',
+    description: 'Melihat audit log',
+  },
 ];
 
 const SUPERADMIN_ROLE_NAME = 'superadmin';

@@ -20,7 +20,7 @@ export class AuditLogController {
   constructor(private readonly auditLogService: AuditLogService) {}
 
   @Get()
-  @RequirePermission('audit-log:read')
+  @RequirePermission('audit_log:read')
   @ApiOperation({
     summary: 'Daftar audit log (pagination + filter)',
     description:
