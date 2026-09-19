@@ -52,6 +52,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # SMTP lokal untuk dev/testing -- TIDAK mengirim email sungguhan, cuma
+  # menangkapnya supaya bisa dilihat di web UI (http://localhost:1080).
+  # Dipakai MailService (src/modules/mail) untuk fitur forgot password.
+  # Gratis, tanpa API key -- ganti SMTP_HOST/PORT/USER/PASSWORD di .env
+  # ke provider asli (mis. Resend/SendGrid) kapan saja tanpa ubah kode,
+  # kalau nanti perlu email BENAR-BENAR sampai ke inbox asli (mis. saat
+  # deploy live demo).
+  maildev:
+    image: maildev/maildev:2.1.0
+    container_name: rbac_maildev
+    restart: unless-stopped
+    ports:
+      - '1080:1080' # web UI -- buka di browser buat lihat email yang "terkirim"
+      - '1025:1025' # SMTP -- inilah yang dipanggil MailService
+
   # Versi di-pin ke tag stabil spesifik (dicek per Sep 2026) -- BUKAN
   # `:latest`, alasan sama persis seperti Postgres/Redis di atas.
   # Silakan cek ulang & sesuaikan ke rilis stabil terbaru sewaktu-waktu.

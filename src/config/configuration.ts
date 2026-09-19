@@ -73,6 +73,21 @@ export default () => ({
     // dan kita toh cuma meneruskannya apa adanya ke Telegram API.
     adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID,
   },
+  mail: {
+    // Default match Maildev (docker-compose.yml) -- lihat MailService
+    // untuk cara transport ini dipakai dan kenapa opsional (bukan
+    // .required() seperti R2/Telegram).
+    host: process.env.SMTP_HOST ?? 'localhost',
+    port: parseInt(process.env.SMTP_PORT ?? '1025', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    // Kosong = tanpa auth (persis kondisi Maildev). Provider asli yang
+    // mewajibkan login tinggal isi kedua env ini, tanpa ubah kode.
+    user: process.env.SMTP_USER || undefined,
+    password: process.env.SMTP_PASSWORD || undefined,
+    from:
+      process.env.SMTP_FROM ??
+      '"Access Console" <no-reply@access-console.local>',
+  },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),

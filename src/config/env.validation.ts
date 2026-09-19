@@ -51,6 +51,22 @@ export const envValidationSchema = Joi.object({
   TELEGRAM_BOT_TOKEN: Joi.string().required(),
   TELEGRAM_ADMIN_CHAT_ID: Joi.string().required(),
 
+  // SMTP (pengiriman email -- forgot password, lihat modules/mail).
+  // Opsional dengan default yang match Maildev di docker-compose.yml --
+  // SENGAJA beda filosofi dari R2/Telegram (.required()) supaya
+  // `npm run start:dev` langsung jalan tanpa perlu edit .env dulu,
+  // selama `docker compose up -d maildev` sudah dijalankan. Ganti ke
+  // kredensial provider asli (Resend/SendGrid/dst) kapan saja tanpa
+  // ubah kode sama sekali, cuma env var ini.
+  SMTP_HOST: Joi.string().default('localhost'),
+  SMTP_PORT: Joi.number().port().default(1025),
+  SMTP_SECURE: Joi.boolean().default(false),
+  SMTP_USER: Joi.string().allow('').optional(),
+  SMTP_PASSWORD: Joi.string().allow('').optional(),
+  SMTP_FROM: Joi.string().default(
+    '"Access Console" <no-reply@access-console.local>',
+  ),
+
   // Redis (cache-aside untuk permission checks, lihat AuthorizationService).
   // Semua opsional dengan default -- SENGAJA tidak `.required()`, karena
   // Redis di project ini murni optimasi, bukan dependency wajib untuk
