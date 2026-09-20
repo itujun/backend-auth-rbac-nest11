@@ -1,5 +1,7 @@
 import { UsersService } from './users.service';
 import { UsersRepository } from './users.repository';
+import { HashingService } from '../../core/hashing/hashing.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import type { FindUsersQueryDto } from './dto/find-users-query.dto';
 import type { User } from '../../database/schema';
 
@@ -22,15 +24,27 @@ function createService() {
   const findActiveByIdMock = jest.fn();
   const findByIdMock = jest.fn();
   const createWithProfileMock = jest.fn();
+  const updateStatusMock = jest.fn();
+  const softDeleteMock = jest.fn();
+  const updatePasswordMock = jest.fn();
   const repository = {
     findAll: findAllMock,
     findByEmail: findByEmailMock,
     findActiveById: findActiveByIdMock,
     findById: findByIdMock,
     createWithProfile: createWithProfileMock,
+    updateStatus: updateStatusMock,
+    softDelete: softDeleteMock,
+    updatePassword: updatePasswordMock,
   } as unknown as UsersRepository;
 
-  const service = new UsersService(repository);
+  const hashMock = jest.fn().mockResolvedValue('hashed:secret');
+  const hashingService = { hash: hashMock } as unknown as HashingService;
+
+  const recordMock = jest.fn().mockResolvedValue(undefined);
+  const auditLogService = { record: recordMock } as unknown as AuditLogService;
+
+  const service = new UsersService(repository, hashingService, auditLogService);
 
   return {
     service,
@@ -39,6 +53,11 @@ function createService() {
     findActiveByIdMock,
     findByIdMock,
     createWithProfileMock,
+    updateStatusMock,
+    softDeleteMock,
+    updatePasswordMock,
+    hashMock,
+    recordMock,
   };
 }
 

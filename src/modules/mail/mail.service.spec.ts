@@ -6,7 +6,8 @@ const sendMailMock = jest.fn().mockResolvedValue(undefined);
 const createTransportMock = jest.fn(() => ({ sendMail: sendMailMock }));
 
 jest.mock('nodemailer', () => ({
-  createTransport: (...args: unknown[]) => createTransportMock(...args),
+  createTransport: (...args: Parameters<typeof createTransportMock>) =>
+    createTransportMock(...args),
 }));
 
 describe('MailService', () => {

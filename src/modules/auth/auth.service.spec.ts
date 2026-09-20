@@ -1,11 +1,14 @@
 import { ConflictException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { HashingService } from '../../core/hashing/hashing.service';
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
+import { PasswordResetTokensService } from './password-reset-tokens/password-reset-tokens.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { TelegramService } from '../telegram/telegram.service';
+import { MailService } from '../mail/mail.service';
 import type { User } from '../../database/schema';
 
 function fakeUser(overrides: Partial<User> = {}): User {
@@ -76,13 +79,39 @@ function createAuthService() {
     notifyAdmin: notifyAdminMock,
   } as unknown as TelegramService;
 
+  const issuePasswordResetMock = jest.fn().mockResolvedValue({
+    rawToken: 'fake-raw-reset-token',
+    expiresAt: new Date('2026-02-01'),
+  });
+  const consumePasswordResetMock = jest.fn();
+  const passwordResetTokensService = {
+    issue: issuePasswordResetMock,
+    consume: consumePasswordResetMock,
+  } as unknown as PasswordResetTokensService;
+
+  const sendMailMock = jest.fn().mockResolvedValue(undefined);
+  const mailService = { sendMail: sendMailMock } as unknown as MailService;
+
+  // Cukup satu key ('app.frontendUrl') yang dipakai AuthService.forgotPassword()
+  // -- key config lain TIDAK relevan untuk unit test ini (bukan berarti
+  // AuthService cuma butuh satu key, ConfigService aslinya menyimpan
+  // jauh lebih banyak).
+  const configValues: Record<string, string> = {
+    'app.frontendUrl': 'http://localhost:5173',
+  };
+  const configGetMock = jest.fn((key: string) => configValues[key]);
+  const configService = { get: configGetMock } as unknown as ConfigService;
+
   const authService = new AuthService(
     usersService,
     hashingService,
     jwtService,
     refreshTokensService,
+    passwordResetTokensService,
     auditLogService,
     telegramService,
+    mailService,
+    configService,
   );
 
   return {
@@ -100,6 +129,9 @@ function createAuthService() {
     rotateMock,
     revokeMock,
     revokeAllForUserMock,
+    issuePasswordResetMock,
+    consumePasswordResetMock,
+    sendMailMock,
   };
 }
 
