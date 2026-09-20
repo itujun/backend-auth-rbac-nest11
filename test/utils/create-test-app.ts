@@ -11,6 +11,7 @@ import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.fil
 import { ResponseInterceptor } from '../../src/common/interceptors/response.interceptor';
 import { REDIS_CLIENT } from '../../src/core/redis/redis.constants';
 import { TelegramService } from '../../src/modules/telegram/telegram.service';
+import { MailService } from '../../src/modules/mail/mail.service';
 
 /**
  * Bootstrap Nest app untuk E2E test dengan pipe/filter/interceptor SAMA
@@ -70,6 +71,22 @@ export async function createTestApp(): Promise<INestApplication> {
     .overrideProvider(TelegramService)
     .useValue({
       notifyAdmin: jest.fn().mockResolvedValue(undefined),
+    })
+    // BEDA alasan dari TelegramService di atas: di sini MEMANG ada nilai
+    // assertion (password-reset.e2e-spec.ts perlu membuktikan sendMail
+    // TERPANGGIL untuk email terdaftar dan TIDAK terpanggil untuk email
+    // yang tidak terdaftar -- itu inti dari perilaku anti-enumeration
+    // yang mau dites). Kalau dibiarkan pakai MailService asli, setiap
+    // test forgot-password akan mencoba konek ke localhost:1025 (default
+    // dev) yang tidak ada di CI -- AuthService.forgotPassword() memang
+    // menangkap error itu (tidak throw ke client, lihat komentar di
+    // sana), TAPI itu berarti test tidak pernah benar-benar tahu apakah
+    // pengiriman "seharusnya" terjadi atau tidak. `jest.fn()` di sini
+    // dipakai test lewat `app.get(MailService)`, BUKAN cuma untuk
+    // menghindari network call.
+    .overrideProvider(MailService)
+    .useValue({
+      sendMail: jest.fn().mockResolvedValue(undefined),
     })
     .compile();
 

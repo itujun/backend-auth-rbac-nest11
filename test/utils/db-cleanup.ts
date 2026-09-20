@@ -8,6 +8,7 @@ import { DRIZZLE, DrizzleDb } from '../../src/database/database.constants';
 // statement, jadi tidak perlu disiplin urutan delete manual per tabel.
 const APP_TABLES = [
   'audit_logs',
+  'password_reset_tokens',
   'refresh_tokens',
   'user_roles',
   'role_permissions',
