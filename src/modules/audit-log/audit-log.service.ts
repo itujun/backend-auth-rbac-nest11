@@ -28,7 +28,11 @@ export type AuditAction =
   | 'permission.delete'
   | 'profile.update'
   | 'profile.avatar_update'
-  | 'profile.avatar_reset';
+  | 'profile.avatar_reset'
+  | 'user.create'
+  | 'user.suspend'
+  | 'user.reactivate'
+  | 'user.delete';
 
 /**
  * Identitas admin yang MELAKUKAN aksi CRUD (role/permission/dst) —

@@ -34,6 +34,12 @@ import {
 
 const BASELINE_PERMISSIONS: Array<{ name: string; description: string }> = [
   { name: 'user:read', description: 'Melihat daftar user (admin)' },
+  { name: 'user:create', description: 'Membuat user baru (admin)' },
+  {
+    name: 'user:manage-status',
+    description: 'Menonaktifkan/mengaktifkan kembali user',
+  },
+  { name: 'user:delete', description: 'Menghapus (soft delete) user' },
   { name: 'role:create', description: 'Membuat role baru' },
   { name: 'role:read', description: 'Melihat daftar/detail role' },
   { name: 'role:update', description: 'Mengubah role' },

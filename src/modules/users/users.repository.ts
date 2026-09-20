@@ -112,6 +112,41 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
+   * Toggle suspend/reactivate. HANYA `isActive` + `updatedAt` yang
+   * disentuh -- tidak pernah `deletedAt` (itu wewenang `softDelete()`
+   * saja). Dipisah dari `softDelete` karena dua konsep ini beda sifat:
+   * suspend reversibel (bisa di-reactivate), delete tidak (lihat
+   * `UsersService.reactivate()` yang sengaja tidak menyentuh user yang
+   * sudah soft-deleted, karena `findById` sudah exclude mereka).
+   */
+  async updateStatus(id: number, isActive: boolean): Promise<User> {
+    const [user] = await this.db
+      .update(users)
+      .set({ isActive, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  /**
+   * Soft delete: isi `deletedAt` + paksa `isActive = false` sekalian
+   * (defense in depth -- `findActiveById`/`findById` sudah cukup
+   * exclude lewat `deletedAt`, tapi kalau ada query lain di masa depan
+   * yang lupa filter `deletedAt`, `isActive = false` jadi lapisan
+   * pengaman kedua). Baris tetap ada di DB (bukan `DELETE` sungguhan)
+   * supaya riwayat & relasi audit log (`onDelete: 'set null'`) tetap
+   * bisa dilacak -- sama filosofinya dengan `audit_logs.actorUserId`.
+   */
+  async softDelete(id: number): Promise<User> {
+    const [user] = await this.db
+      .update(users)
+      .set({ isActive: false, deletedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  /**
    * Dipanggil SATU tempat saja: `AuthService.resetPassword()` (lewat
    * `UsersService.updatePassword()`). Method setipis mungkin -- tidak
    * ada audit log di sini, karena pencatatannya (`password_reset.completed`)
