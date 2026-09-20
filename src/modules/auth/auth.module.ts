@@ -12,9 +12,12 @@ import { UsersModule } from '../users/users.module';
 import { HashingModule } from '../../core/hashing/hashing.module';
 import { RefreshTokensRepository } from './refresh-tokens/refresh-tokens.repository';
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
+import { PasswordResetTokensRepository } from './password-reset-tokens/password-reset-tokens.repository';
+import { PasswordResetTokensService } from './password-reset-tokens/password-reset-tokens.service';
 import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { TelegramModule } from '../telegram/telegram.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
@@ -22,6 +25,7 @@ import { TelegramModule } from '../telegram/telegram.module';
     HashingModule,
     AuditLogModule,
     TelegramModule,
+    MailModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -45,6 +49,8 @@ import { TelegramModule } from '../telegram/telegram.module';
     JwtStrategy,
     RefreshTokensRepository,
     RefreshTokensService,
+    PasswordResetTokensRepository,
+    PasswordResetTokensService,
     RefreshCookieHelper,
     // Didaftarkan sebagai APP_GUARD supaya berlaku GLOBAL ke semua route
     // di seluruh aplikasi (bukan cuma modul ini) — lihat penjelasan

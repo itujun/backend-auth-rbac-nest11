@@ -23,6 +23,8 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { RefreshResponseDto } from './dto/refresh-response.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -223,5 +225,52 @@ export class AuthController {
   @ResponseMessage('Profil user berhasil diambil')
   me(@CurrentUser() user: SafeUser) {
     return user;
+  }
+
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
+  @ApiOperation({
+    summary: 'Minta link reset password',
+    description:
+      'SELALU balas pesan sukses yang sama, terlepas email terdaftar ' +
+      'atau tidak (anti user-enumeration). Link dikirim ke email kalau ' +
+      'memang terdaftar & akun aktif.',
+  })
+  @ApiResponse({ status: 200, description: 'Permintaan diterima' })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
+  })
+  @ResponseMessage(
+    'Kalau email tersebut terdaftar, link reset password sudah dikirim',
+  )
+  async forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    await this.authService.forgotPassword(dto, this.requestMeta(req));
+    return null;
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
+  @ApiOperation({
+    summary: 'Atur password baru pakai token dari email',
+    description:
+      'Token sekali pakai, berlaku singkat (default 30 menit). Semua ' +
+      'sesi/device lama otomatis di-logout setelah berhasil.',
+  })
+  @ApiResponse({ status: 200, description: 'Password berhasil diubah' })
+  @ApiResponse({
+    status: 400,
+    description: 'Token tidak valid, sudah dipakai, atau sudah kedaluwarsa',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
+  })
+  @ResponseMessage('Password berhasil diubah, silakan login ulang')
+  async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
+    await this.authService.resetPassword(dto, this.requestMeta(req));
+    return null;
   }
 }

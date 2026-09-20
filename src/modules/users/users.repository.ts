@@ -112,6 +112,24 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
+   * Dipanggil SATU tempat saja: `AuthService.resetPassword()` (lewat
+   * `UsersService.updatePassword()`). Method setipis mungkin -- tidak
+   * ada audit log di sini, karena pencatatannya (`password_reset.completed`)
+   * jadi tanggung jawab `AuthService`, bukan `UsersRepository`/`UsersService`
+   * (konsisten dengan `updateStatus`/`softDelete` di file ini yang juga
+   * TIDAK audit log sendiri -- audit selalu ditulis satu layer di atas,
+   * oleh caller yang tahu KONTEKS aksinya, bukan oleh layer data).
+   */
+  async updatePassword(id: number, passwordHash: string): Promise<User> {
+    const [user] = await this.db
+      .update(users)
+      .set({ passwordHash, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  /**
    * Insert `users` + `profiles` dalam SATU transaction.
    * Karena `profiles.user_id` NOT NULL UNIQUE (lihat ERD), user tanpa
    * profile adalah state yang tidak valid — kalau insert profile gagal,

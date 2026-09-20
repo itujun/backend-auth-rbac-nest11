@@ -78,6 +78,23 @@ export const envValidationSchema = Joi.object({
   REDIS_KEY_PREFIX: Joi.string().default('rbac:'),
   REDIS_PERMISSIONS_TTL_SECONDS: Joi.number().integer().positive().default(300),
 
+  // URL FE -- dipakai membentuk link di email reset password (mis.
+  // `${FRONTEND_URL}/reset-password?token=...`). BEDA tujuan dari
+  // CORS_ORIGIN di bawah walau nilainya kebetulan sama di dev (satu
+  // dipakai browser buat validasi origin request, satu dipakai BE buat
+  // menyusun URL yang ditaruh di BADAN EMAIL) -- sengaja env var
+  // terpisah supaya keduanya bisa beda tanpa saling mengganggu kalau
+  // nanti FE di-deploy ke domain lain dari yang di-whitelist CORS
+  // (jarang, tapi bisa terjadi mis. saat migrasi domain bertahap).
+  FRONTEND_URL: Joi.string().uri().default('http://localhost:5173'),
+
+  // Umur token reset password (lihat PasswordResetTokensService). Lebih
+  // pendek dari JWT_REFRESH_EXPIRES_IN (7d) SENGAJA -- token ini
+  // dikirim lewat email (kanal yang lebih rawan diintip/tertinggal di
+  // inbox lama dibanding cookie httpOnly), jadi window serangannya
+  // dipersempit jauh.
+  PASSWORD_RESET_TOKEN_EXPIRES_IN: Joi.string().default('30m'),
+
   // CORS
   // Comma-separated untuk >1 origin (mis. dev + E2E test) -- di-parse
   // jadi array di configuration.ts. Tetap Joi.string() di sini karena

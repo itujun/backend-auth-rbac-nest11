@@ -20,6 +20,11 @@ export default () => ({
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean),
+
+    // Dipakai membentuk link di email reset password -- lihat komentar
+    // perbandingan dengan CORS_ORIGIN di env.validation.ts.
+    frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+
     // Default: aktif di semua environment SELAIN production. Di production
     // tetap bisa dipaksa aktif via ENABLE_SWAGGER=true kalau memang perlu
     // (mis. portofolio yang sengaja dipamerkan publik) — tapi sadari
@@ -87,6 +92,9 @@ export default () => ({
     from:
       process.env.SMTP_FROM ??
       '"Access Console" <no-reply@access-console.local>',
+  },
+  passwordReset: {
+    tokenExpiresIn: process.env.PASSWORD_RESET_TOKEN_EXPIRES_IN ?? '30m',
   },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',

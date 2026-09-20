@@ -5,6 +5,7 @@ export * from './permissions.schema';
 export * from './role-permissions.schema';
 export * from './user-roles.schema';
 export * from './refresh-tokens.schema';
+export * from './password-reset-tokens.schema';
 export * from './audit-logs.schema';
 
 import { users, usersRelations } from './users.schema';
@@ -17,6 +18,10 @@ import {
 } from './role-permissions.schema';
 import { userRoles, userRolesRelations } from './user-roles.schema';
 import { refreshTokens, refreshTokensRelations } from './refresh-tokens.schema';
+import {
+  passwordResetTokens,
+  passwordResetTokensRelations,
+} from './password-reset-tokens.schema';
 import { auditLogs, auditLogsRelations } from './audit-logs.schema';
 
 /**
@@ -39,6 +44,8 @@ export const schema = {
   userRolesRelations,
   refreshTokens,
   refreshTokensRelations,
+  passwordResetTokens,
+  passwordResetTokensRelations,
   auditLogs,
   auditLogsRelations,
 };

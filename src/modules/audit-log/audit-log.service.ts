@@ -15,6 +15,8 @@ export type AuditAction =
   | 'auth.login_failed'
   | 'auth.logout'
   | 'auth.logout_all'
+  | 'password_reset.requested'
+  | 'password_reset.completed'
   | 'role.create'
   | 'role.update'
   | 'role.delete'
