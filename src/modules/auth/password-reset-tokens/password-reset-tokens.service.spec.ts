@@ -3,26 +3,51 @@ import { ConfigService } from '@nestjs/config';
 import { PasswordResetTokensService } from './password-reset-tokens.service';
 import { PasswordResetTokensRepository } from './password-reset-tokens.repository';
 
+interface FakeCreateInput {
+  userId: number;
+  tokenHash: string;
+  expiresAt: Date;
+}
+
+interface FakeCreatedRow {
+  id: number;
+  userId: number;
+  expiresAt: Date;
+}
+
+interface FakeConsumedRow {
+  id: number;
+  userId: number;
+}
+
 describe('PasswordResetTokensService', () => {
   let service: PasswordResetTokensService;
+  // Di-generic-kan (bukan `jest.Mock` polos) SUPAYA `.mock.calls[0]`
+  // punya tipe yang benar dari awal, bukan `any` -- file ini di bawah
+  // `src/`, TETAP strict (beda dari `test/**/*.ts` yang sengaja
+  // dilonggarkan khusus untuk E2E, lihat eslint.config.mjs). Bentuk
+  // generic `<ReturnType, Args>` (BUKAN `<(args) => ReturnType>`) --
+  // versi @types/jest di project ini cuma punya overload 0 atau 2 tipe
+  // argumen, bukan 1.
   let repository: {
-    invalidateAllForUser: jest.Mock;
-    create: jest.Mock;
-    consume: jest.Mock;
+    invalidateAllForUser: jest.Mock<Promise<void>, [number]>;
+    create: jest.Mock<Promise<FakeCreatedRow>, [FakeCreateInput]>;
+    consume: jest.Mock<Promise<FakeConsumedRow | null>, [string]>;
   };
 
   beforeEach(async () => {
     repository = {
-      invalidateAllForUser: jest.fn().mockResolvedValue(undefined),
-      create: jest.fn().mockResolvedValue({
-        id: 1,
-        userId: 7,
-        tokenHash: 'irrelevant-di-test-ini',
-        isUsed: false,
-        expiresAt: new Date(Date.now() + 30 * 60_000),
-        createdAt: new Date(),
-      }),
-      consume: jest.fn(),
+      invalidateAllForUser: jest
+        .fn<Promise<void>, [number]>()
+        .mockResolvedValue(undefined),
+      create: jest
+        .fn<Promise<FakeCreatedRow>, [FakeCreateInput]>()
+        .mockResolvedValue({
+          id: 1,
+          userId: 7,
+          expiresAt: new Date(Date.now() + 30 * 60_000),
+        }),
+      consume: jest.fn<Promise<FakeConsumedRow | null>, [string]>(),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -42,16 +67,17 @@ describe('PasswordResetTokensService', () => {
   describe('issue', () => {
     it('menginvalidasi token lama SEBELUM membuat yang baru (urutan penting)', async () => {
       const callOrder: string[] = [];
-      repository.invalidateAllForUser.mockImplementation(async () => {
+      repository.invalidateAllForUser.mockImplementation(() => {
         callOrder.push('invalidate');
+        return Promise.resolve();
       });
-      repository.create.mockImplementation(async () => {
+      repository.create.mockImplementation(() => {
         callOrder.push('create');
-        return {
+        return Promise.resolve({
           id: 1,
           userId: 7,
           expiresAt: new Date(Date.now() + 30 * 60_000),
-        };
+        });
       });
 
       await service.issue(7);
@@ -71,7 +97,7 @@ describe('PasswordResetTokensService', () => {
     it('TIDAK menyimpan rawToken ke repository -- yang disimpan harus hash-nya', async () => {
       const { rawToken } = await service.issue(7);
 
-      const createArg = repository.create.mock.calls[0][0];
+      const [createArg] = repository.create.mock.calls[0];
       expect(createArg.tokenHash).not.toBe(rawToken);
       expect(createArg.userId).toBe(7);
     });
@@ -100,7 +126,11 @@ describe('PasswordResetTokensService', () => {
       const rawToken = 'contoh-token-mentah';
       await service.consume(rawToken);
 
-      const hashArg = repository.consume.mock.calls[0][0];
+      // PENTING: repository.consume, BUKAN repository.create -- consume()
+      // tidak pernah memanggil create() sama sekali, cek yang salah
+      // (create) akan crash runtime karena mock itu tidak pernah
+      // ter-panggil di test ini (.mock.calls[0] jadi undefined).
+      const [hashArg] = repository.consume.mock.calls[0];
       expect(hashArg).not.toBe(rawToken);
       expect(hashArg).toMatch(/^[0-9a-f]{64}$/); // SHA-256 hex
     });
