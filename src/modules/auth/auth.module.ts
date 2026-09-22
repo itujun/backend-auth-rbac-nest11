@@ -14,6 +14,8 @@ import { RefreshTokensRepository } from './refresh-tokens/refresh-tokens.reposit
 import { RefreshTokensService } from './refresh-tokens/refresh-tokens.service';
 import { PasswordResetTokensRepository } from './password-reset-tokens/password-reset-tokens.repository';
 import { PasswordResetTokensService } from './password-reset-tokens/password-reset-tokens.service';
+import { EmailVerificationTokensRepository } from './email-verification-tokens/email-verification-tokens.repository';
+import { EmailVerificationTokensService } from './email-verification-tokens/email-verification-tokens.service';
 import { RefreshCookieHelper } from './utils/refresh-cookie.helper';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { TelegramModule } from '../telegram/telegram.module';
@@ -33,9 +35,6 @@ import { MailModule } from '../mail/mail.module';
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>('jwt.accessSecret'),
         signOptions: {
-          // Cast ke StringValue (dari package `ms`): env var kita berupa
-          // string seperti "15m"/"1h", @nestjs/jwt v11 mengetikkan
-          // expiresIn secara ketat sebagai literal-pattern, bukan `string` biasa.
           expiresIn: configService.get<string>(
             'jwt.accessExpiresIn',
           ) as StringValue,
@@ -51,10 +50,9 @@ import { MailModule } from '../mail/mail.module';
     RefreshTokensService,
     PasswordResetTokensRepository,
     PasswordResetTokensService,
+    EmailVerificationTokensRepository,
+    EmailVerificationTokensService,
     RefreshCookieHelper,
-    // Didaftarkan sebagai APP_GUARD supaya berlaku GLOBAL ke semua route
-    // di seluruh aplikasi (bukan cuma modul ini) — lihat penjelasan
-    // "secure by default" di common/decorators/public.decorator.ts
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,

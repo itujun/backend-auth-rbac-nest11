@@ -18,6 +18,12 @@ export interface CreateUserWithProfileInput {
   email: string;
   passwordHash: string;
   fullName?: string;
+  // Diisi (new Date()) HANYA oleh alur admin-create (UsersService.create()) --
+  // self-registration (AuthService.register()) selalu mengirim undefined
+  // di sini, karena email BARU dianggap terverifikasi setelah user klik
+  // link di email, bukan seketika saat akun dibuat. Admin yang membuat
+  // user secara langsung dianggap sudah memvalidasi email itu sendiri.
+  emailVerifiedAt?: Date;
 }
 
 const SORT_COLUMN_MAP = {
@@ -147,6 +153,20 @@ export class UsersRepository extends BaseRepository {
   }
 
   /**
+   * Dipanggil SATU tempat saja: `AuthService.verifyEmail()`. Setipis
+   * `updatePassword()` -- tidak ada audit log di sini, dicatat di
+   * AuthService sebagai `email_verification.completed`.
+   */
+  async markEmailVerified(id: number): Promise<User> {
+    const [user] = await this.db
+      .update(users)
+      .set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return user;
+  }
+
+  /**
    * Dipanggil SATU tempat saja: `AuthService.resetPassword()` (lewat
    * `UsersService.updatePassword()`). Method setipis mungkin -- tidak
    * ada audit log di sini, karena pencatatannya (`password_reset.completed`)
@@ -177,6 +197,7 @@ export class UsersRepository extends BaseRepository {
         .values({
           email: input.email,
           passwordHash: input.passwordHash,
+          emailVerifiedAt: input.emailVerifiedAt,
         })
         .returning();
 

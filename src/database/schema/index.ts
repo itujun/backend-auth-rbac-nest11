@@ -6,6 +6,7 @@ export * from './role-permissions.schema';
 export * from './user-roles.schema';
 export * from './refresh-tokens.schema';
 export * from './password-reset-tokens.schema';
+export * from './email-verification-tokens.schema';
 export * from './audit-logs.schema';
 
 import { users, usersRelations } from './users.schema';
@@ -22,6 +23,10 @@ import {
   passwordResetTokens,
   passwordResetTokensRelations,
 } from './password-reset-tokens.schema';
+import {
+  emailVerificationTokens,
+  emailVerificationTokensRelations,
+} from './email-verification-tokens.schema';
 import { auditLogs, auditLogsRelations } from './audit-logs.schema';
 
 /**
@@ -46,6 +51,8 @@ export const schema = {
   refreshTokensRelations,
   passwordResetTokens,
   passwordResetTokensRelations,
+  emailVerificationTokens,
+  emailVerificationTokensRelations,
   auditLogs,
   auditLogsRelations,
 };

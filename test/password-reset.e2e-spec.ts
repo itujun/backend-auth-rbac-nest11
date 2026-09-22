@@ -39,6 +39,22 @@ describe('Forgot/Reset Password (e2e)', () => {
 
   const api = () => request(app.getHttpServer());
 
+  /**
+   * WAJIB dipakai (bukan registerAndLogin() langsung) di seluruh file
+   * ini -- sejak fitur verifikasi email ada, register() JUGA memicu
+   * sendMail() (email verifikasi). File ini cuma peduli pada perilaku
+   * mail dari forgot-password/reset-password, jadi efek samping
+   * registrasi itu langsung dibersihkan supaya tidak ikut kehitung di
+   * assertion toHaveBeenCalledTimes()/not.toHaveBeenCalled() di bawah.
+   */
+  async function registerAndLoginQuiet(
+    ...args: Parameters<typeof registerAndLogin>
+  ) {
+    const session = await registerAndLogin(...args);
+    mailServiceMock.sendMail.mockClear();
+    return session;
+  }
+
   beforeAll(async () => {
     app = await createTestApp();
     db = app.get<DrizzleDb>(DRIZZLE);
@@ -61,7 +77,7 @@ describe('Forgot/Reset Password (e2e)', () => {
 
   describe('POST /api/auth/forgot-password', () => {
     it('email terdaftar & aktif -> 200, MailService.sendMail terpanggil dengan link berisi token', async () => {
-      await registerAndLogin(app, {
+      await registerAndLoginQuiet(app, {
         email: 'lupapw@example.com',
         password: 'password123',
       });
@@ -95,7 +111,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('akun nonaktif (suspended) -> 200, MailService.sendMail TIDAK terpanggil', async () => {
-      const { user } = await registerAndLogin(app, {
+      const { user } = await registerAndLoginQuiet(app, {
         email: 'nonaktif@example.com',
         password: 'password123',
       });
@@ -117,7 +133,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('tercatat di audit log sebagai password_reset.requested, HANYA untuk email yang match', async () => {
-      const { user } = await registerAndLogin(app, {
+      const { user } = await registerAndLoginQuiet(app, {
         email: 'diauditreset@example.com',
         password: 'password123',
       });
@@ -142,7 +158,7 @@ describe('Forgot/Reset Password (e2e)', () => {
 
   describe('POST /api/auth/reset-password', () => {
     it('token valid -> 200, login pakai password baru sukses, password lama gagal', async () => {
-      await registerAndLogin(app, {
+      await registerAndLoginQuiet(app, {
         email: 'resetsukses@example.com',
         password: 'passwordLama123',
       });
@@ -168,7 +184,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('token yang sama dipakai dua kali -> kedua kalinya 400 (sekali pakai)', async () => {
-      await registerAndLogin(app, {
+      await registerAndLoginQuiet(app, {
         email: 'tokensekalipakai@example.com',
         password: 'password123',
       });
@@ -191,7 +207,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('token sudah kedaluwarsa -> 400', async () => {
-      const { user } = await registerAndLogin(app, {
+      const { user } = await registerAndLoginQuiet(app, {
         email: 'tokenkedaluwarsa@example.com',
         password: 'password123',
       });
@@ -222,7 +238,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('berhasil reset -> SEMUA sesi lama ikut ter-revoke (refresh token lama tidak bisa dipakai lagi)', async () => {
-      const session = await registerAndLogin(app, {
+      const session = await registerAndLoginQuiet(app, {
         email: 'sesilamaterrevoke@example.com',
         password: 'passwordLama123',
       });
@@ -244,7 +260,7 @@ describe('Forgot/Reset Password (e2e)', () => {
     });
 
     it('tercatat di audit log sebagai password_reset.completed', async () => {
-      const { user } = await registerAndLogin(app, {
+      const { user } = await registerAndLoginQuiet(app, {
         email: 'diauditcompleted@example.com',
         password: 'password123',
       });

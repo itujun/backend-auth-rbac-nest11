@@ -95,6 +95,12 @@ export const envValidationSchema = Joi.object({
   // dipersempit jauh.
   PASSWORD_RESET_TOKEN_EXPIRES_IN: Joi.string().default('30m'),
 
+  // Umur token verifikasi email (lihat EmailVerificationTokensService).
+  // Jauh lebih longgar dari token reset password -- verifikasi email
+  // bukan operasi sensitif keamanan (cuma konfirmasi kepemilikan
+  // alamat), jadi wajar kalau user baru sempat buka emailnya besok.
+  EMAIL_VERIFICATION_TOKEN_EXPIRES_IN: Joi.string().default('24h'),
+
   // CORS
   // Comma-separated untuk >1 origin (mis. dev + E2E test) -- di-parse
   // jadi array di configuration.ts. Tetap Joi.string() di sini karena

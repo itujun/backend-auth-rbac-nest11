@@ -25,6 +25,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { RefreshResponseDto } from './dto/refresh-response.dto';
 import { Public } from '../../common/decorators/public.decorator';
@@ -271,6 +273,56 @@ export class AuthController {
   @ResponseMessage('Password berhasil diubah, silakan login ulang')
   async resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
     await this.authService.resetPassword(dto, this.requestMeta(req));
+    return null;
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
+  @ApiOperation({
+    summary: 'Verifikasi email pakai token dari link registrasi',
+    description:
+      'Token sekali pakai, default berlaku 24 jam. Tidak memblokir ' +
+      'login -- status ini murni informasional (lihat catatan desain).',
+  })
+  @ApiResponse({ status: 200, description: 'Email berhasil diverifikasi' })
+  @ApiResponse({
+    status: 400,
+    description: 'Token tidak valid, sudah dipakai, atau sudah kedaluwarsa',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
+  })
+  @ResponseMessage('Email berhasil diverifikasi')
+  async verifyEmail(@Body() dto: VerifyEmailDto, @Req() req: Request) {
+    await this.authService.verifyEmail(dto, this.requestMeta(req));
+    return null;
+  }
+
+  @Public()
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @Throttle(AUTH_THROTTLE)
+  @ApiOperation({
+    summary: 'Kirim ulang link verifikasi email',
+    description:
+      'SELALU balas pesan sukses yang sama, terlepas email terdaftar, ' +
+      'sudah terverifikasi, atau tidak (anti user-enumeration) -- pola ' +
+      'sama persis dengan forgot-password.',
+  })
+  @ApiResponse({ status: 200, description: 'Permintaan diterima' })
+  @ApiTooManyRequestsResponse({
+    description: 'Terlalu banyak percobaan, coba lagi nanti (maks 5/menit)',
+  })
+  @ResponseMessage(
+    'Kalau email tersebut terdaftar dan belum terverifikasi, link baru sudah dikirim',
+  )
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+    @Req() req: Request,
+  ) {
+    await this.authService.resendVerification(dto, this.requestMeta(req));
     return null;
   }
 }

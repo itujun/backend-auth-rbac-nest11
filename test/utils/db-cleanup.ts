@@ -9,6 +9,7 @@ import { DRIZZLE, DrizzleDb } from '../../src/database/database.constants';
 const APP_TABLES = [
   'audit_logs',
   'password_reset_tokens',
+  'email_verification_tokens',
   'refresh_tokens',
   'user_roles',
   'role_permissions',

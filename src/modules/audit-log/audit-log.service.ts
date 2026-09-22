@@ -17,6 +17,8 @@ export type AuditAction =
   | 'auth.logout_all'
   | 'password_reset.requested'
   | 'password_reset.completed'
+  | 'email_verification.completed'
+  | 'email_verification.resent'
   | 'role.create'
   | 'role.update'
   | 'role.delete'

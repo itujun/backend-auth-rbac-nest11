@@ -96,6 +96,9 @@ export default () => ({
   passwordReset: {
     tokenExpiresIn: process.env.PASSWORD_RESET_TOKEN_EXPIRES_IN ?? '30m',
   },
+  emailVerification: {
+    tokenExpiresIn: process.env.EMAIL_VERIFICATION_TOKEN_EXPIRES_IN ?? '24h',
+  },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),

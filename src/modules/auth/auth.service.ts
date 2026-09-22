@@ -13,6 +13,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { User } from '../../database/schema';
 import {
@@ -20,6 +22,7 @@ import {
   RequestMeta,
 } from './refresh-tokens/refresh-tokens.service';
 import { PasswordResetTokensService } from './password-reset-tokens/password-reset-tokens.service';
+import { EmailVerificationTokensService } from './email-verification-tokens/email-verification-tokens.service';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
@@ -34,6 +37,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly refreshTokensService: RefreshTokensService,
     private readonly passwordResetTokensService: PasswordResetTokensService,
+    private readonly emailVerificationTokensService: EmailVerificationTokensService,
     private readonly auditLogService: AuditLogService,
     private readonly telegramService: TelegramService,
     private readonly mailService: MailService,
@@ -54,9 +58,6 @@ export class AuthService {
       fullName: dto.fullName,
     });
 
-    // `record()` dijamin tidak pernah reject (lihat AuditLogService) —
-    // aman di-`await` tanpa risiko registrasi yang SUDAH berhasil malah
-    // dilaporkan gagal ke client gara-gara audit log gagal ditulis.
     await this.auditLogService.record({
       action: 'auth.register',
       actorUserId: user.id,
@@ -67,12 +68,6 @@ export class AuthService {
       userAgent: meta.userAgent,
     });
 
-    // Sama seperti audit log di atas: `notifyAdmin()` dijamin tidak
-    // pernah reject (lihat TelegramService), jadi aman di-`await` di
-    // sini tanpa risiko registrasi gagal gara-gara Telegram down.
-    // SENGAJA diletakkan setelah audit log tercatat, bukan sebelum --
-    // kalau ternyata harus dipilih urutan, audit trail (kepatuhan)
-    // lebih prioritas daripada notifikasi (kenyamanan).
     await this.telegramService.notifyAdmin(
       [
         'Registrasi user baru',
@@ -82,24 +77,44 @@ export class AuthService {
       ].join('\n'),
     );
 
+    // Best-effort, SAMA alasannya seperti forgotPassword() -- kegagalan
+    // kirim (mis. SMTP down) tidak boleh menggagalkan registrasi yang
+    // SUDAH berhasil. Opsi B (lihat diskusi desain fitur ini): user
+    // tetap bisa login walau belum verifikasi, jadi tidak fatal kalau
+    // email ini sempat tidak sampai -- user bisa minta kirim ulang
+    // lewat resendVerification() kapan saja.
+    try {
+      const { rawToken } = await this.emailVerificationTokensService.issue(
+        user.id,
+      );
+      const frontendUrl = this.configService.get<string>('app.frontendUrl');
+      const verifyLink = `${frontendUrl}/verify-email?token=${rawToken}`;
+      await this.mailService.sendMail({
+        to: user.email,
+        subject: 'Verifikasi Email — Access Console',
+        html: [
+          `<p>Terima kasih sudah mendaftar di Access Console.</p>`,
+          `<p><a href="${verifyLink}">Klik di sini untuk verifikasi email kamu</a></p>`,
+          `<p>Link ini berlaku 24 jam.</p>`,
+        ].join('\n'),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Gagal mengirim email verifikasi ke ${user.email}: ${String(err)}`,
+      );
+    }
+
     return this.usersService.sanitize(user);
   }
 
   async login(dto: LoginDto, meta: RequestMeta = {}) {
     const user = await this.usersService.findByEmail(dto.email);
 
-    // Pesan error SENGAJA dibuat sama antara "email tidak ada" dan
-    // "password salah" (anti user-enumeration) — attacker tidak bisa
-    // menebak email mana saja yang terdaftar dari response error.
     const invalidCredentialsError = new UnauthorizedException(
       'Email atau password salah',
     );
 
     if (!user) {
-      // actorUserId null (user tidak ditemukan) TAPI actorEmail tetap
-      // dicatat (email yang DICOBA, bukan email user asli) — berguna
-      // untuk mendeteksi pola credential-stuffing/brute-force walau
-      // emailnya sendiri tidak pernah terdaftar.
       await this.auditLogService.record({
         action: 'auth.login_failed',
         actorEmail: dto.email,
@@ -167,8 +182,6 @@ export class AuthService {
 
     const user = await this.usersService.findActiveById(userId);
     if (!user) {
-      // Edge case: user dihapus/dinonaktifkan tapi refresh token-nya
-      // masih ada & valid (belum expired). Tolak dan bersihkan sesi.
       await this.refreshTokensService.revokeAllForUser(userId);
       throw new UnauthorizedException('User tidak ditemukan atau tidak aktif');
     }
@@ -185,8 +198,6 @@ export class AuthService {
   async logout(rawRefreshToken: string, meta: RequestMeta = {}): Promise<void> {
     const revoked = await this.refreshTokensService.revoke(rawRefreshToken);
 
-    // revoked bisa null (token sudah basi/tidak dikenal) — logout tetap
-    // idempotent, tapi tidak ada userId yang bisa dicatat sebagai actor.
     if (revoked) {
       await this.auditLogService.record({
         action: 'auth.logout',
@@ -207,24 +218,12 @@ export class AuthService {
     });
   }
 
-  /**
-   * SELALU resolve tanpa error, APAPUN hasilnya -- baik email tidak
-   * terdaftar, akun tidak aktif, maupun email gagal terkirim. Ini
-   * prinsip anti user-enumeration yang sama seperti `login()` (pesan
-   * error email-salah vs password-salah dibuat identik) -- kalau
-   * endpoint ini membalas beda antara "email ditemukan" vs "tidak",
-   * attacker bisa memakainya untuk mengetes email mana saja yang
-   * terdaftar di sistem, satu per satu.
-   */
   async forgotPassword(
     dto: ForgotPasswordDto,
     meta: RequestMeta = {},
   ): Promise<void> {
     const user = await this.usersService.findByEmail(dto.email);
 
-    // Diam-diam berhenti di sini kalau user tidak ada / tidak aktif /
-    // sudah dihapus -- TIDAK throw, TIDAK beda respons ke client
-    // (lihat controller: selalu balas pesan generic yang sama).
     if (!user || !user.isActive || user.deletedAt) {
       return;
     }
@@ -233,13 +232,6 @@ export class AuthService {
     const frontendUrl = this.configService.get<string>('app.frontendUrl');
     const resetLink = `${frontendUrl}/reset-password?token=${rawToken}`;
 
-    // TIDAK di-await tanpa try-catch seperti audit log/Telegram --
-    // MailService SENGAJA tidak best-effort (lihat komentar di sana),
-    // jadi AuthService yang menangkap kegagalannya di sini. Kalaupun
-    // email gagal terkirim (mis. Maildev/SMTP provider lagi down),
-    // client TETAP dapat respons generic sukses yang sama (anti
-    // enumeration) -- kegagalan cuma terlihat di server log untuk ops,
-    // bukan bocor ke response API.
     try {
       await this.mailService.sendMail({
         to: user.email,
@@ -271,19 +263,11 @@ export class AuthService {
   ): Promise<void> {
     const consumed = await this.passwordResetTokensService.consume(dto.token);
 
-    // Tiga kemungkinan (token tidak dikenal / sudah dipakai / sudah
-    // kedaluwarsa) SENGAJA dibalas dengan pesan yang SAMA -- membedakan
-    // pesannya akan membocorkan informasi ke attacker soal token mana
-    // yang "pernah" valid.
     if (!consumed) {
       throw new BadRequestException('Token tidak valid atau sudah kedaluwarsa');
     }
 
     const user = await this.usersService.findById(consumed.userId);
-    // Edge case: user dihapus PERSIS di antara token diterbitkan dan
-    // dipakai. Token sudah kadung ditandai used oleh `consume()` di
-    // atas (memang seharusnya, tetap sekali pakai), tapi tidak ada user
-    // valid untuk diubah passwordnya.
     if (!user) {
       throw new BadRequestException('Token tidak valid atau sudah kedaluwarsa');
     }
@@ -291,15 +275,94 @@ export class AuthService {
     const passwordHash = await this.hashingService.hash(dto.newPassword);
     await this.usersService.updatePassword(user.id, passwordHash);
 
-    // Password baru saja berubah -- paksa SEMUA sesi lama logout,
-    // termasuk sesi attacker kalau skenarionya memang akun dibajak dan
-    // pemilik asli sedang reset password untuk mengambil alih kembali.
-    // Pola sama seperti kenapa `logoutAll()` ada sebagai endpoint
-    // terpisah, cuma di sini dipicu otomatis, bukan diminta user.
     await this.refreshTokensService.revokeAllForUser(user.id);
 
     await this.auditLogService.record({
       action: 'password_reset.completed',
+      actorUserId: user.id,
+      actorEmail: user.email,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  async verifyEmail(
+    dto: VerifyEmailDto,
+    meta: RequestMeta = {},
+  ): Promise<void> {
+    const consumed = await this.emailVerificationTokensService.consume(
+      dto.token,
+    );
+    if (!consumed) {
+      throw new BadRequestException('Token tidak valid atau sudah kedaluwarsa');
+    }
+
+    const user = await this.usersService.findById(consumed.userId);
+    if (!user) {
+      throw new BadRequestException('Token tidak valid atau sudah kedaluwarsa');
+    }
+
+    // Guard idempotent: token sekali pakai sudah cukup untuk mencegah
+    // token yang SAMA dipakai dua kali, tapi ini jaga-jaga tambahan
+    // untuk skenario token BEDA yang kebetulan dipakai setelah user
+    // sudah terverifikasi lebih dulu (mis. link lama di email lain
+    // yang belum sempat diinvalidasi) -- supaya tidak menulis
+    // `emailVerifiedAt` ulang atau audit log dobel untuk kejadian yang
+    // secara efektif sama.
+    if (!user.emailVerifiedAt) {
+      await this.usersService.markEmailVerified(user.id);
+      await this.auditLogService.record({
+        action: 'email_verification.completed',
+        actorUserId: user.id,
+        actorEmail: user.email,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      });
+    }
+  }
+
+  /**
+   * Anti-enumeration, SAMA persis pola & alasannya dengan
+   * forgotPassword() -- diam-diam berhenti (TANPA beda respons ke
+   * client) kalau email tidak terdaftar, akun tidak aktif/dihapus,
+   * ATAU sudah terverifikasi (kondisi terakhir ini yang beda dari
+   * forgotPassword, tapi alasannya sama: tidak membocorkan status
+   * verifikasi akun orang lain lewat endpoint publik ini).
+   */
+  async resendVerification(
+    dto: ResendVerificationDto,
+    meta: RequestMeta = {},
+  ): Promise<void> {
+    const user = await this.usersService.findByEmail(dto.email);
+
+    if (!user || !user.isActive || user.deletedAt || user.emailVerifiedAt) {
+      return;
+    }
+
+    const { rawToken } = await this.emailVerificationTokensService.issue(
+      user.id,
+    );
+    const frontendUrl = this.configService.get<string>('app.frontendUrl');
+    const verifyLink = `${frontendUrl}/verify-email?token=${rawToken}`;
+
+    try {
+      await this.mailService.sendMail({
+        to: user.email,
+        subject: 'Verifikasi Email — Access Console',
+        html: [
+          `<p>Berikut link verifikasi email baru untuk akun ${user.email}.</p>`,
+          `<p><a href="${verifyLink}">Klik di sini untuk verifikasi email kamu</a></p>`,
+          `<p>Link ini berlaku 24 jam.</p>`,
+        ].join('\n'),
+      });
+    } catch (err) {
+      this.logger.error(
+        `Gagal mengirim ulang email verifikasi ke ${user.email}: ${String(err)}`,
+      );
+    }
+
+    await this.auditLogService.record({
+      action: 'email_verification.resent',
       actorUserId: user.id,
       actorEmail: user.email,
       ipAddress: meta.ipAddress,

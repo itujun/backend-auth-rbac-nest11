@@ -63,6 +63,15 @@ export class UsersService {
   }
 
   /**
+   * Passthrough tipis, TIDAK ada audit log di sini -- dipanggil dari
+   * `AuthService.verifyEmail()`, yang mencatat `email_verification.completed`
+   * sendiri. Sama seperti `updatePassword()`.
+   */
+  markEmailVerified(id: number) {
+    return this.usersRepository.markEmailVerified(id);
+  }
+
+  /**
    * Admin membuat user baru langsung dari Users management -- beda
    * dari `AuthService.register()` (self-registration): tidak memicu
    * notifikasi Telegram ke admin (admin-lah yang melakukan aksi ini),
@@ -81,6 +90,10 @@ export class UsersService {
       email: dto.email,
       passwordHash,
       fullName: dto.fullName,
+      // Admin yang membuat -> dianggap sudah memvalidasi email ini
+      // sendiri, beda dari self-registration (lihat komentar di
+      // CreateUserWithProfileInput).
+      emailVerifiedAt: new Date(),
     });
 
     await this.auditLogService.record({

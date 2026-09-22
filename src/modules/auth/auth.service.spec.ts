@@ -10,6 +10,7 @@ import { AuditLogService } from '../audit-log/audit-log.service';
 import { TelegramService } from '../telegram/telegram.service';
 import { MailService } from '../mail/mail.service';
 import type { User } from '../../database/schema';
+import { EmailVerificationTokensService } from './email-verification-tokens/email-verification-tokens.service';
 
 function fakeUser(overrides: Partial<User> = {}): User {
   return {
@@ -17,6 +18,7 @@ function fakeUser(overrides: Partial<User> = {}): User {
     email: 'budi@example.com',
     passwordHash: 'hashed:password123',
     isActive: true,
+    emailVerifiedAt: new Date('2026-01-01'),
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     deletedAt: null,
@@ -89,6 +91,16 @@ function createAuthService() {
     consume: consumePasswordResetMock,
   } as unknown as PasswordResetTokensService;
 
+  const issueEmailVerificationMock = jest.fn().mockResolvedValue({
+    rawToken: 'fake-raw-verify-token',
+    expiresAt: new Date('2026-02-02'),
+  });
+  const consumeEmailVerificationMock = jest.fn();
+  const emailVerificationTokensService = {
+    issue: issueEmailVerificationMock,
+    consume: consumeEmailVerificationMock,
+  } as unknown as EmailVerificationTokensService;
+
   const sendMailMock = jest.fn().mockResolvedValue(undefined);
   const mailService = { sendMail: sendMailMock } as unknown as MailService;
 
@@ -108,6 +120,7 @@ function createAuthService() {
     jwtService,
     refreshTokensService,
     passwordResetTokensService,
+    emailVerificationTokensService,
     auditLogService,
     telegramService,
     mailService,
@@ -131,6 +144,8 @@ function createAuthService() {
     revokeAllForUserMock,
     issuePasswordResetMock,
     consumePasswordResetMock,
+    issueEmailVerificationMock,
+    consumeEmailVerificationMock,
     sendMailMock,
   };
 }
