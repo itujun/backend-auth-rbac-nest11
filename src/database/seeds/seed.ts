@@ -68,6 +68,11 @@ const BASELINE_PERMISSIONS: Array<{ name: string; description: string }> = [
     name: 'audit_log:read',
     description: 'Melihat audit log',
   },
+  {
+    name: 'dashboard:read',
+    description:
+      'Melihat ringkasan statistik dashboard (angka agregat, terpisah dari permission granular tiap resource)',
+  },
 ];
 
 const SUPERADMIN_ROLE_NAME = 'superadmin';

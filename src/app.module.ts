@@ -15,6 +15,7 @@ import { AuthorizationModule } from './core/authorization/authorization.module';
 import { PermissionsModule } from './modules/permissions/permissions.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RedisModule } from './core/redis/redis.module';
 
 @Module({
@@ -76,6 +77,7 @@ import { RedisModule } from './core/redis/redis.module';
     PermissionsModule,
     RolesModule,
     ProfilesModule,
+    DashboardModule,
   ],
   providers: [
     // Guard global PERTAMA yang jalan (lihat komentar ThrottlerModule di
